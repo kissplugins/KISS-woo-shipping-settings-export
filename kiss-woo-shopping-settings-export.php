@@ -6,8 +6,8 @@
  * managers download a CSV containing every WooCommerce shipping zone, method, rate and shipping
  * class defined in the store. The CSV begins with the site name and a timestamp.
  *
- * @package   KISSShippingExporter
- * @author    Your Name
+ * @package   KISS Woo Shipping Settings Exporter
+ * @author    KISS Plugins
  * @copyright Copyright (c) 2025 Your Name
  * @license   GPL-2.0+
  * @link      https://example.com/
@@ -18,7 +18,7 @@
  * Plugin Name: KISS Woo Shipping Settings Exporter
  * Description: Adds a link to the plugins page and an item to the Tools menu to export all WooCommerce shipping settings to a downloadable CSV.
  * Version:   0.3.0
- * Author:    Your Name
+ * Author:    KISS Plugins
  * License:   GPL-2.0+
  * Requires at least: 6.0
  * Requires PHP: 7.4
