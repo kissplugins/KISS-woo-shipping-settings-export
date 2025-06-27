@@ -7,11 +7,11 @@ Stable tag: 0.2.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
-
+ 
 A simple, robust tool for store managers to export all WooCommerce shipping configuration data—zones, methods, rates, and classes—to a single, timestamped CSV file.
-
+ 
 == Description ==
-
+ 
 WooCommerce shipping settings can be complex and spread across many different screens. **Woo Shipping Exporter** provides a one-click utility to get a complete, bird's-eye view of your entire shipping setup in a single, easy-to-read CSV file.
 
 The plugin adds a new page under **Tools → Shipping CSV Export** in your WordPress admin area. With a single click, it generates and downloads a CSV containing every shipping zone, its assigned locations, all configured shipping methods with their costs, and a full list of your store's shipping classes.
