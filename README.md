@@ -1,5 +1,5 @@
 === KISS Woo Shipping Settings Exporter ===
-Contributors: your-name-here
+Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple
 Requires at least: 6.0
 Tested up to: 6.8
