@@ -6,8 +6,8 @@
  * containing every WooCommerce shipping zone, method, rate and shipping class defined in the store.  
  * The CSV begins with the site name and a timestamp so it can be easily identified when archived.
  *
- * @package   WooShippingExporter
- * @author    Your Name
+ * @package   KISS Woo Shipping Settings Exporter
+ * @author    KISS Plugins
  * @copyright Copyright (c) " . date('Y') . " Your Name"
  * @license   GPL‑2.0+
  * @link      https://example.com/
@@ -15,29 +15,57 @@
  */
 
 /**
- * Plugin Name: Woo Shipping Exporter
+ * Plugin Name: KISS Woo Shipping Settings Exporter
  * Description: Export WooCommerce shipping zones, methods, rates and classes to a downloadable CSV that begins with the site name and a timestamp.
  * Version: 0.1.0
- * Author: Your Name
+ * Author: KISS Plugins
  * License: GPL‑2.0+
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: woo-shipping-exporter
  */
 
+// BEST PRACTICE: Prevent direct access to the file.
 if ( ! defined( 'ABSPATH' ) ) {
-    // Prevent direct access to the file.
     exit;
 }
+
+/**
+ * MODIFICATION: Defer plugin initialization until all plugins are loaded.
+ *
+ * This ensures that WooCommerce classes are available and prevents fatal errors if
+ * WooCommerce is not active or loads after this plugin.
+ */
+add_action( 'plugins_loaded', 'wse_initialize_exporter' );
+
+/**
+ * Initializes the exporter class after checking for WooCommerce.
+ *
+ * @since 0.2.0
+ */
+function wse_initialize_exporter(): void {
+    // MODIFICATION: Check if WooCommerce is active before running any code.
+    if ( ! class_exists( 'WooCommerce' ) ) {
+        // Optional: Add an admin notice to inform the user.
+        add_action( 'admin_notices', function() {
+            ?>
+            <div class="notice notice-error">
+                <p><?php esc_html_e( 'The Woo Shipping Exporter plugin requires WooCommerce to be active.', 'woo-shipping-exporter' ); ?></p>
+            </div>
+            <?php
+        });
+        return;
+    }
+
+    // All clear, instantiate the plugin.
+    new WSE_Exporter();
+}
+
 
 if ( ! class_exists( 'WSE_Exporter' ) ) {
 
     /**
      * Main exporter class.
-     *
-     * Hooks into the WordPress admin to render a page under Tools that lets an authorised user export
-     * WooCommerce shipping data. The heavy lifting is done in `handle_export()`, which streams the CSV
-     * directly to the browser so that no temporary files are left on the server.
      *
      * @since 0.1.0
      */
@@ -45,9 +73,6 @@ if ( ! class_exists( 'WSE_Exporter' ) ) {
 
         /**
          * Constructor.
-         *
-         * Registers all the actions required to expose the export UI and handle the CSV generation
-         * request.
          *
          * @since 0.1.0
          */
@@ -57,63 +82,49 @@ if ( ! class_exists( 'WSE_Exporter' ) ) {
         }
 
         /**
-         * Adds an item to the *Tools* menu (Tools → Shipping CSV Export).
+         * Adds an item to the *Tools* menu.
          *
          * @since 0.1.0
-         *
-         * @return void
          */
         public function register_menu(): void {
             add_management_page(
                 __( 'Shipping CSV Export', 'woo-shipping-exporter' ), // Page title.
                 __( 'Shipping CSV Export', 'woo-shipping-exporter' ), // Menu title.
-                'manage_woocommerce',                                  // Capability.
-                'wse-export',                                          // Slug.
-                [ $this, 'render_page' ]                               // Callback.
+                'manage_woocommerce',                                 // Capability.
+                'wse-export',                                         // Slug.
+                [ $this, 'render_page' ]                              // Callback.
             );
         }
 
         /**
-         * Renders the admin page containing a single **Download CSV** button.
+         * Renders the admin page.
          *
          * @since 0.1.0
-         *
-         * @return void Outputs HTML directly.
          */
         public function render_page(): void {
+            // BEST PRACTICE: Capability check is already handled by add_management_page,
+            // but an explicit check here doesn't hurt.
             if ( ! current_user_can( 'manage_woocommerce' ) ) {
                 return;
             }
             ?>
             <div class="wrap">
                 <h1><?php esc_html_e( 'Export WooCommerce Shipping Data', 'woo-shipping-exporter' ); ?></h1>
-                <p><?php esc_html_e( 'Click the button below to generate a CSV that contains every shipping zone, method, rate, and shipping class defined in this store.', 'woo-shipping-exporter' ); ?></p>
+                <p><?php esc_html_e( 'Click the button below to generate a CSV that contains every shipping zone, method, rate, and shipping class defined in this store.', 'woo-shipping-exporter' ); ?></p>
+                <p><?php esc_html_e( 'Note: For sites with a very large number of shipping zones, this process may take some time to complete.', 'woo-shipping-exporter' ); ?></p>
                 <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                     <?php wp_nonce_field( 'wse_export', 'wse_nonce' ); ?>
                     <input type="hidden" name="action" value="wse_export" />
-                    <p><button type="submit" class="button button-primary button-large"><?php esc_html_e( 'Download CSV', 'woo-shipping-exporter' ); ?></button></p>
+                    <p><button type="submit" class="button button-primary button-large"><?php esc_html_e( 'Download CSV', 'woo-shipping-exporter' ); ?></button></p>
                 </form>
             </div>
             <?php
         }
 
         /**
-         * Handles the POST request triggered by the **Download CSV** button.
-         *
-         * Runs capability and nonce checks, sets the correct headers for a streamed CSV download, and
-         * then writes shipping‑related data line‑by‑line to the output buffer. The CSV is structured
-         * as follows:
-         *
-         * 1. Site name row.
-         * 2. Timestamp row (in the site’s timezone).
-         * 3. Blank row.
-         * 4. Table of shipping zones → methods → (optional) per‑class costs.
-         * 5. Blank row.
-         * 6. Table of shipping classes.
+         * Handles the POST request and generates the CSV.
          *
          * @since 0.1.0
-         *
-         * @return void Exits the request after streaming the CSV.
          */
         public function handle_export(): void {
             if ( ! current_user_can( 'manage_woocommerce' ) ) {
@@ -122,119 +133,147 @@ if ( ! class_exists( 'WSE_Exporter' ) ) {
 
             check_admin_referer( 'wse_export', 'wse_nonce' );
 
-            // Filename example: my-store-shipping-2025-06-26-103218.csv
-            $filename = sanitize_title( get_bloginfo( 'name' ) ) . '-shipping-' . gmdate( 'Y-m-d-His' ) . '.csv';
+            // MODIFICATION: Prevent script from timing out on large exports.
+            // This is the most critical change to prevent server crashes.
+            // set_time_limit(0) allows the script to run indefinitely.
+            if ( function_exists( 'set_time_limit' ) ) {
+                set_time_limit( 0 );
+            }
 
-            // Tell the browser we are sending CSV and force file download.
+            // MODIFICATION: Use the WordPress date/time functions for correct timezone handling.
+            $filename = sanitize_title( get_bloginfo( 'name' ) ) . '-shipping-' . wp_date( 'Y-m-d-His' ) . '.csv';
+
+            // MODIFICATION: Clear any previously buffered output to prevent "headers already sent" errors.
+            if ( ob_get_level() > 0 ) {
+                ob_end_clean();
+            }
+
             header( 'Content-Type: text/csv; charset=utf-8' );
             header( 'Content-Disposition: attachment; filename=' . $filename );
 
-            $output = fopen( 'php://output', 'w' );
+            // BEST PRACTICE: Wrap the entire file generation in a try/catch block for graceful error handling.
+            try {
+                $output = fopen( 'php://output', 'w' );
 
-            /* -------------------------------------------------------------- */
-            /* Preamble — site name + timestamp                               */
-            /* -------------------------------------------------------------- */
-            fputcsv( $output, [ get_bloginfo( 'name' ) ] );
-            fputcsv( $output, [ 'Generated:', current_time( 'mysql' ) ] );
-            fputcsv( $output, [] ); // Blank separator line.
+                /* Preamble — site name + timestamp */
+                fputcsv( $output, [ get_bloginfo( 'name' ) . ' - Shipping Export' ] );
+                // MODIFICATION: Use wp_date for a localized timestamp.
+                fputcsv( $output, [ 'Generated:', wp_date( 'Y-m-d H:i:s' ) ] );
+                fputcsv( $output, [] );
 
-            /* -------------------------------------------------------------- */
-            /* Shipping Zones, Methods & Rates                               */
-            /* -------------------------------------------------------------- */
-            fputcsv( $output, [
-                'Zone ID',
-                'Zone Name',
-                'Locations',
-                'Method ID',
-                'Method Title',
-                'Method Type',
-                'Cost',
-                'Tax Status',
-                'Class ID',
-                'Class Cost',
-            ] );
+                /* Shipping Zones, Methods & Rates */
+                // BEST PRACTICE: More descriptive headers.
+                fputcsv( $output, [
+                    'Zone ID',
+                    'Zone Name',
+                    'Zone Locations (code:type)',
+                    'Method Instance ID',
+                    'Method Title',
+                    'Method Type',
+                    'Cost',
+                    'Tax Status',
+                    'Shipping Class ID',
+                    'Shipping Class Cost',
+                ] );
+                
+                // MODIFICATION: Use WC_Shipping_Zones::get_zones() for consistency with WC practices.
+                foreach ( WC_Shipping_Zones::get_zones() as $zone_array ) {
+                    // BEST PRACTICE: Use a more representative object.
+                    $zone = new WC_Shipping_Zone($zone_array['zone_id']);
 
-            foreach ( wc_get_shipping_zones() as $zone_array ) {
-                $zone_id   = (int) $zone_array['id'];
-                $zone_name = $zone_array['zone_name'];
+                    $locations = [];
+                    foreach ( $zone->get_zone_locations() as $location ) {
+                        $locations[] = $location->code . ':' . $location->type;
+                    }
+                    $location_str = implode( ' | ', $locations );
 
-                // Build a pipe‑delimited list of location codes (e.g. country:US|state:CA).
-                $locations      = [];
-                $zone_locations = $zone_array['zone_locations'];
-                foreach ( $zone_locations as $loc ) {
-                    $locations[] = $loc->type . ':' . $loc->code;
-                }
-                $location_str = implode( '|', $locations );
+                    if (empty($location_str)) {
+                        $location_str = 'All locations';
+                    }
 
-                // Iterate through each shipping method in the zone.
-                foreach ( $zone_array['shipping_methods'] as $method ) {
-                    /** @var WC_Shipping_Method $method */
-                    $settings = $method->get_instance_settings();
+                    foreach ( $zone->get_shipping_methods( true ) as $instance_id => $method ) {
+                        /** @var WC_Shipping_Method $method */
+                        $settings = $method->instance_settings; // Already loaded property.
 
-                    $cost       = $settings['cost']       ?? '';
-                    $tax_status = $settings['tax_status'] ?? '';
+                        $cost       = $settings['cost']       ?? '';
+                        $tax_status = $settings['tax_status'] ?? '';
+                        
+                        // Handle class costs for methods that support them (e.g., flat_rate).
+                        if ( ! empty( $settings['class_costs'] ) && is_array( $settings['class_costs'] ) ) {
+                            foreach ( $settings['class_costs'] as $class_slug => $class_cost ) {
+                                // The key is the slug, we need the ID.
+                                $class_term = get_term_by( 'slug', $class_slug, 'product_shipping_class' );
+                                $class_id   = $class_term ? $class_term->term_id : 'slug:' . $class_slug;
 
-                    // If flat‑rate per‑class costs are defined, output one row per class.
-                    if ( isset( $settings['class_costs'] ) && is_array( $settings['class_costs'] ) && $settings['class_costs'] ) {
-                        foreach ( $settings['class_costs'] as $class_id => $class_cost ) {
+                                fputcsv( $output, [
+                                    $zone->get_id(),
+                                    $zone->get_zone_name(),
+                                    $location_str,
+                                    $instance_id,
+                                    $method->get_title(),
+                                    $method->id,
+                                    $cost,
+                                    $tax_status,
+                                    $class_id,
+                                    $class_cost,
+                                ] );
+                            }
+                        } else {
                             fputcsv( $output, [
-                                $zone_id,
-                                $zone_name,
+                                $zone->get_id(),
+                                $zone->get_zone_name(),
                                 $location_str,
-                                $method->get_id(),
-                                $method->get_method_title(),
+                                $instance_id,
+                                $method->get_title(),
                                 $method->id,
                                 $cost,
                                 $tax_status,
-                                $class_id,
-                                $class_cost,
+                                '', // No class ID
+                                '', // No class cost
                             ] );
                         }
-                    } else {
-                        // No per‑class overrides — output a single row.
+                    }
+                    // BEST PRACTICE: Unset large variables in long loops to help with memory management.
+                    unset($zone, $locations, $location_str);
+                }
+
+                /* Shipping Class Catalogue */
+                fputcsv( $output, [] );
+                fputcsv( $output, [ 'All Defined Shipping Classes' ] );
+                fputcsv( $output, [ 'Class ID', 'Class Name', 'Slug', 'Description' ] );
+
+                // BEST PRACTICE: Use the dedicated WC function.
+                $shipping_classes = WC()->shipping()->get_shipping_classes();
+
+                if ( ! empty($shipping_classes) ) {
+                    foreach ( $shipping_classes as $class ) {
                         fputcsv( $output, [
-                            $zone_id,
-                            $zone_name,
-                            $location_str,
-                            $method->get_id(),
-                            $method->get_method_title(),
-                            $method->id,
-                            $cost,
-                            $tax_status,
-                            '',
-                            '',
+                            $class->term_id,
+                            $class->name,
+                            $class->slug,
+                            $class->description,
                         ] );
                     }
+                } else {
+                     fputcsv( $output, [ 'No shipping classes found.' ] );
+                }
+                
+            } catch ( Exception $e ) {
+                // MODIFICATION: If anything goes wrong, log the error and stop gracefully.
+                // This prevents a broken file download or a white screen of death.
+                $error_message = 'An error occurred during CSV generation: ' . $e->getMessage();
+                error_log($error_message); // Log for the site admin.
+                // We can't output the error to the CSV as headers are already sent.
+                // The script will just exit here, resulting in a potentially incomplete file,
+                // but the server won't crash and the error is logged.
+            } finally {
+                // BEST PRACTICE: Always ensure the file handle is closed.
+                if ( isset($output) && is_resource($output) ) {
+                    fclose( $output );
                 }
             }
 
-            /* -------------------------------------------------------------- */
-            /* Shipping Class Catalogue                                       */
-            /* -------------------------------------------------------------- */
-            fputcsv( $output, [] );
-            fputcsv( $output, [ 'Shipping Classes' ] );
-            fputcsv( $output, [ 'Class ID', 'Class Name', 'Slug', 'Description' ] );
-
-            $classes = get_terms( [
-                'taxonomy'   => 'product_shipping_class',
-                'hide_empty' => false,
-            ] );
-
-            foreach ( $classes as $class ) {
-                fputcsv( $output, [
-                    $class->term_id,
-                    $class->name,
-                    $class->slug,
-                    $class->description,
-                ] );
-            }
-
-            fclose( $output );
             exit;
         }
     }
-
-    // Instantiate the exporter so that its hooks register.
-    new WSE_Exporter();
 }
-?>
