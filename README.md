@@ -18,6 +18,11 @@ The plugin adds a new page under **Tools → KISS Shipping Exporter** in your Wo
 
 The export is streamed directly to your browser to ensure it works on any server without hitting memory limits or leaving temporary files behind.
 
+== Dependency==
+Please first download, install, and activate the WP loader for PHP Parser Library below. It’s self contained version using PHP Parser v5.2.0:
+https://github.com/kissplugins/wp-php-parser-loader
+Note the license for this BSD-3-Clause and not GPL v2 like this plugin.
+
 == Key Features ==
 
 * **Convenient Access:** Export directly from the plugins page via the "Export Settings" link, or navigate to the Tools menu.
