@@ -16,7 +16,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Exporter
  * Description: Exports UI settings and analyzes custom shipping rules from your theme's functions.php and other files.
- * Version:   1.5.2
+ * Version:   1.5.4
  * Author:    KISS Plugins
  * Author URI: https://kissplugins.com
  * License:   GPL-2.0+
@@ -34,10 +34,6 @@ add_action( 'plugins_loaded', 'kiss_wse_initialize_exporter' );
 
 /**
  * Initializes the exporter class and all dependencies after checking requirements.
- *
- * MODIFICATION v1.5.1: All class definitions have been moved inside this function.
- * This prevents PHP from trying to parse them before their parent dependencies
- * from the PHP-Parser library are available, resolving the fatal error.
  */
 function kiss_wse_initialize_exporter(): void {
     // 1. Check for dependencies first.
@@ -55,13 +51,39 @@ function kiss_wse_initialize_exporter(): void {
     if (!class_exists('KISS_WSE_AST_Visitor')) {
         class KISS_WSE_AST_Visitor extends \PhpParser\NodeVisitorAbstract {
             public $rules = [];
-            private $prettyPrinter;
+            private $declared_arrays = [];
             private $condition_context_stack = [];
             private $source_lines;
 
             public function __construct(string $code) { 
-                $this->prettyPrinter = new \PhpParser\PrettyPrinter\Standard(); 
                 $this->source_lines = explode("\n", $code);
+            }
+
+            public function beforeTraverse(array $nodes) {
+                // First pass: find all array declarations and store them.
+                $traverser = new \PhpParser\NodeTraverser();
+                $array_collector = new class extends \PhpParser\NodeVisitorAbstract {
+                    public $arrays = [];
+                    public function enterNode(\PhpParser\Node $node) {
+                        if ($node instanceof \PhpParser\Node\Expr\Assign && $node->expr instanceof \PhpParser\Node\Expr\Array_) {
+                            if (isset($node->var->name)) {
+                                $this->arrays[$node->var->name] = $this->extract_array_values($node->expr);
+                            }
+                        }
+                    }
+                    private function extract_array_values(\PhpParser\Node\Expr\Array_ $array_node): array {
+                        $values = [];
+                        foreach ($array_node->items as $item) {
+                            if ($item->value instanceof \PhpParser\Node\Scalar\String_) {
+                                $values[] = $item->value->value;
+                            }
+                        }
+                        return $values;
+                    }
+                };
+                $traverser->addVisitor($array_collector);
+                $traverser->traverse($nodes);
+                $this->declared_arrays = $array_collector->arrays;
             }
 
             public function enterNode(\PhpParser\Node $node) {
@@ -97,8 +119,20 @@ function kiss_wse_initialize_exporter(): void {
 
             private function extract_conditions($cond_node, $conditions = []) {
                 if ($cond_node instanceof \PhpParser\Node\Expr\BinaryOp) {
-                     if ($cond_node->left instanceof \PhpParser\Node\Expr\Variable && isset($cond_node->left->name) && $cond_node->left->name === 'state') {
-                        $conditions[] = ['type' => 'state_is', 'value' => $cond_node->right->value ?? 'Dynamic Value'];
+                    $variableNode = $cond_node->left;
+                    $valueNode = $cond_node->right;
+                    
+                    if ($variableNode instanceof \PhpParser\Node\Expr\Variable && in_array($variableNode->name, ['state', 'postcode'])) {
+                        $value = 'Dynamic Value'; // Default
+                        if ($valueNode instanceof \PhpParser\Node\Scalar\String_ || $valueNode instanceof \PhpParser\Node\Scalar\LNumber) {
+                            $value = $valueNode->value;
+                        }
+                        $conditions[] = [
+                            'type' => 'variable_comparison',
+                            'variable' => $variableNode->name,
+                            'operator' => $cond_node->getOperatorSigil(),
+                            'value' => $value
+                        ];
                     } else {
                         $conditions = array_merge($conditions, $this->extract_conditions($cond_node->left));
                         $conditions = array_merge($conditions, $this->extract_conditions($cond_node->right));
@@ -109,6 +143,16 @@ function kiss_wse_initialize_exporter(): void {
                         $cats = [];
                         foreach($cond_node->args[0]->value->items as $item) $cats[] = $item->value->value;
                         $conditions[] = ['type' => 'cart_has_category', 'value' => implode(', ', $cats)];
+                    } else if ($funcName === 'in_array' && isset($cond_node->args[1]->value->name)) {
+                        $array_name = $cond_node->args[1]->value->name;
+                        if (isset($this->declared_arrays[$array_name])) {
+                            $conditions[] = [
+                                'type' => 'variable_in_array', 
+                                'variable' => $cond_node->args[0]->value->name ?? 'unknown',
+                                'array_name' => $array_name,
+                                'value' => implode(', ', $this->declared_arrays[$array_name])
+                            ];
+                        }
                     } else {
                         $conditions[] = ['type' => 'function_check', 'value' => $funcName];
                     }
@@ -152,7 +196,6 @@ function kiss_wse_initialize_exporter(): void {
                     ];
 
                     $nodeTraverser = new \PhpParser\NodeTraverser();
-                    // Add parent attribute to each node, crucial for context
                     $nodeTraverser->addVisitor(new \PhpParser\NodeVisitor\ParentConnectingVisitor());
                     $visitor = new KISS_WSE_AST_Visitor($code);
                     $nodeTraverser->addVisitor($visitor);
@@ -172,9 +215,10 @@ function kiss_wse_initialize_exporter(): void {
                 $condition_strings = [];
                 foreach ($rule['conditions'] as $condition) {
                     switch ($condition['type']) {
-                        case 'state_is': $condition_strings[] = "the shipping State is <strong>'{$condition['value']}'</strong>"; break;
+                        case 'variable_comparison': $condition_strings[] = "the <code>\${$condition['variable']}</code> is {$condition['operator']} <strong>'{$condition['value']}'</strong>"; break;
                         case 'cart_has_category': $condition_strings[] = "the cart contains a product from category/ies <strong>'{$condition['value']}'</strong>"; break;
                         case 'function_check': $condition_strings[] = "the condition <code>{$condition['value']}()</code> is true"; break;
+                        case 'variable_in_array': $condition_strings[] = "the <code>\${$condition['variable']}</code> is in the list of <strong>{$condition['array_name']}</strong> (values: <em>{$condition['value']}</em>)"; break;
                     }
                 }
                 if (!empty($condition_strings)) {
