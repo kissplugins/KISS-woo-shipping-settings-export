@@ -3,7 +3,7 @@ Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple
 Requires at least: 6.0
 Tested up to: 6.8
-Stable tag: 0.3.0
+Stable tag: 1.5.5
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -52,6 +52,36 @@ The export is streamed directly to your browser to ensure it works on any server
 3.  Your browser will download a CSV file containing all shipping data.
 
 == Changelog ==
+
+= 1.5.5 =
+* **Enhancement:** The "Custom Rules Scanner" analysis is now more concise and readable.
+* **Enhancement:** Conditions using `||` (OR) on the same variable (e.g., `$state == 'CA' || $state == 'CO'`) are now consolidated into a single line.
+* **Enhancement:** Improved `has_term` analysis to correctly extract category names passed as a single string, in addition to arrays of strings.
+
+= 1.5.4 =
+* **Feature:** The scanner can now detect direct comparisons on the `$state` and `$postcode` variables within `if` statements. The analysis will now show the specific value being compared (e.g., "IF the $state is == 'CA'").
+
+= 1.5.3 =
+* **Feature:** The "Custom Rules Scanner" now detects arrays used in `in_array()` conditions. It will display the name of the array and list its values in the human-readable analysis, providing a much clearer picture of location-based and other group restrictions.
+
+= 1.5.2 =
+* **Fix:** Restored the UI-based shipping settings preview table to the main admin page. The table was accidentally removed in a previous version.
+
+= 1.5.1 =
+* **Fix:** Resolved a fatal error caused by PHP-Parser class dependencies loading out of order. All class definitions are now nested inside the main `kiss_wse_initialize_exporter` function to ensure dependencies are available before being called.
+* **Enhancement:** The "Custom Rules Scanner" now uses the much more robust PHP-Parser library to traverse the Abstract Syntax Tree (AST) of scanned files. This provides a significantly more accurate and context-aware analysis of `if` conditions and `add` actions.
+* **Enhancement:** The scanner now displays the raw code snippet for each rule it detects, providing direct context for the analysis.
+* **Enhancement:** Added a collapsible "Debugging Information" section that shows the parser's status and a dump of the AST, aiding in troubleshooting complex or unrecognized code patterns.
+* **Enhancement:** The scanner now targets both `functions.php` and a theme-specific `inc/shipping-restrictions.php` file.
+
+= 0.5.0 =
+* **Feature:** Added a new "Custom Rules Scanner" that performs a basic token-based scan of the theme's `inc/shipping-restrictions.php` file to find and display hard-coded shipping rules.
+* **Enhancement:** The admin page is now split into two sections: the new custom scanner and the existing UI settings exporter.
+* **Refactor:** The admin page rendering logic is now more organized.
+
+= 0.4.0 =
+* **Feature:** Added a preview table on the admin page that displays the first 10 shipping zone configurations, giving a quick overview without needing to download the full CSV.
+* **Enhancement:** Improved the export logic to include more details and handle edge cases for shipping methods without costs.
 
 = 0.3.0 =
 * **Enhancement:** Plugin renamed to "KISS Woo Shipping Settings Exporter" for clarity.
