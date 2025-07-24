@@ -1,6 +1,6 @@
 <?php
 /**
- * KISS Woo Shipping Settings Exporter — main plugin file.
+ * KISS Woo Shipping Settings Debugger — main plugin file.
  *
  * Provides an admin-side utility to export UI-based shipping settings and scan the theme for
  * custom, code-based shipping restriction rules.
