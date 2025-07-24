@@ -1,20 +1,20 @@
-=== KISS Woo Shipping Settings Exporter ===
-Contributors: KISS Plugins
-Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple
-Requires at least: 6.0
-Tested up to: 6.8
-Stable tag: 0.3.0
-Requires PHP: 7.4
-License: GPLv2 or later
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
+=== KISS Woo Shipping Settings Debugger ===  
+Contributors: KISS Plugins  
+Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple  
+Requires at least: 6.0  
+Tested up to: 6.8  
+Stable tag: 0.3.0  
+Requires PHP: 7.4  
+License: GPLv2 or later  
+License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
-A simple, robust tool for store managers to export all WooCommerce shipping settings—zones, methods, rates, and classes—to a single, timestamped CSV file.
+A simple, robust tool for store managers to debug and export all WooCommerce shipping settings—zones, methods, rates, and classes—to a single, timestamped CSV file.
 
 == Description ==
 
-WooCommerce shipping settings can be complex. **KISS Woo Shipping Settings Exporter** provides a one-click utility to get a complete, bird's-eye view of your entire shipping setup in a single, easy-to-read CSV file.
+WooCommerce shipping settings can be complex. **KISS Woo Shipping Settings Debugger** provides a one-click utility to get a complete, bird's-eye view of your entire shipping setup in a single, easy-to-read CSV file.
 
-The plugin adds a new page under **Tools → KISS Shipping Exporter** in your WordPress admin area, as well as a convenient **"Export Settings"** link directly on the plugins page. With a single click, it generates and downloads a CSV containing every shipping zone, its assigned locations, all configured shipping methods with their costs, and a full list of your store's shipping classes.
+The plugin adds a new page under **Tools → KISS Shipping Debugger** in your WordPress admin area, as well as a convenient **"Export Settings"** link directly on the plugins page. With a single click, it generates and downloads a CSV containing every shipping zone, its assigned locations, all configured shipping methods with their costs, and a full list of your store's shipping classes.
 
 The export is streamed directly to your browser to ensure it works on any server without hitting memory limits or leaving temporary files behind.
 
