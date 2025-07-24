@@ -1,4 +1,4 @@
-=== KISS Woo Shipping Settings Exporter ===
+=== KISS Woo Shipping Settings Debugger ===
 Contributors: KISS Plugins
 Tags: woocommerce, shipping, export, csv, shipping zones, shipping methods, backup, audit, simple
 Requires at least: 6.0
