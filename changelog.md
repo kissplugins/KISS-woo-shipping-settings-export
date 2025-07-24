@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+* **Enhancement:** The "Zone Name" in the UI settings preview table is now a direct link to the corresponding WooCommerce shipping zone editor page.
+* **Enhancement:** The Custom Rules Scanner now provides a descriptive message for empty or placeholder translation strings, preventing empty bullet points in the output.
+
 ## 0.3.0
 * **Enhancement:** Plugin renamed to "KISS Woo Shipping Settings Debugger" for clarity.
 * **Enhancement:** Added a convenient "Export Settings" link on the main plugins page for one-click access.
