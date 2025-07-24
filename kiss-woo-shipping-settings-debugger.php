@@ -16,7 +16,7 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Adds a link to the plugins page and a Tool to export settings and scan the theme for custom shipping rules.
- * Version:   0.5.0
+ * Version:   0.6.0
  * Author:    Your Name
  * License:   GPL-2.0+
  * Requires at least: 6.0
@@ -71,7 +71,7 @@ if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
         }
 
         /**
-         * NEW: Scans the theme for the custom shipping restrictions file and renders the results.
+         * Scans the theme for the custom shipping restrictions file and renders the results.
          * @since 0.5.0
          */
         private function scan_and_render_custom_rules(): void {
@@ -123,11 +123,18 @@ if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
                     }
                 }
 
-                // Detect error messages being added
+                /**
+                 * Detect error messages being added.
+                 * @since 0.6.0 - Improved to be more descriptive and handle empty placeholders.
+                 */
                 if ($token[0] === T_STRING && $token[1] === '__') {
-                     if (isset($tokens[$i+2][1])) {
-                        $message = trim($tokens[$i+2][1], '"');
-                        $rules[] = ['type' => 'message', 'value' => esc_html($message)];
+                     if (isset($tokens[$i+2]) && $tokens[$i+2][0] === T_CONSTANT_ENCAPSED_STRING) {
+                        $message = trim($tokens[$i+2][1], "'\"");
+                        if ( !empty($message) && trim($message) !== '.' ) {
+                             $rules[] = ['type' => 'message', 'value' => 'Displays message: <em>"' . esc_html($message) . '"</em>'];
+                        } else {
+                             $rules[] = ['type' => 'message', 'value' => '<em>(Note: A placeholder or empty message string was detected here.)</em>'];
+                        }
                      }
                 }
 
@@ -178,16 +185,15 @@ if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
                     <input type="hidden" name="action" value="<?php echo esc_attr( $this->page_slug ); ?>" />
                     <?php echo $submit_button_html; ?>
                     
-                    <!-- Code for preview table from v0.4.0... -->
                     <?php
                         $preview_limit = 10;
                         $zone_headers = [ 'Zone Name', 'Locations', 'Method Title', 'Method Type', 'Cost', 'Class Cost' ];
                         $all_zones = WC_Shipping_Zones::get_zones();
                         $preview_zones_data = []; $total_zone_rows = 0;
-                        foreach ($all_zones as $zone_array) { if (count($preview_zones_data) >= $preview_limit) break; $zone = new WC_Shipping_Zone($zone_array['zone_id']); $locations = []; foreach ($zone->get_zone_locations() as $location) { $locations[] = $location->code . ':' . $location->type; } $location_str = empty($locations) ? 'Rest of the World' : implode(' | ', $locations); $methods = $zone->get_shipping_methods(true); if (empty($methods)) { $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, '<em>No methods configured</em>', '', '', '' ]; $total_zone_rows++; } else { foreach ($methods as $method) { if (count($preview_zones_data) >= $preview_limit) break 2; $settings = $method->instance_settings; $cost = $settings['cost'] ?? ''; if (!empty($settings['class_costs']) && is_array($settings['class_costs'])) { foreach ($settings['class_costs'] as $slug => $class_cost) { if (count($preview_zones_data) >= $preview_limit) break 3; $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, $method->get_title(), $method->id, $cost, $class_cost ]; $total_zone_rows++; } } else { $preview_zones_data[] = [ $zone->get_zone_name(), $location_str, $method->get_title(), $method->id, $cost, '' ]; $total_zone_rows++; } } } }
+                        foreach ($all_zones as $zone_array) { if (count($preview_zones_data) >= $preview_limit) break; $zone = new WC_Shipping_Zone($zone_array['zone_id']); $zone_id = $zone->get_id(); $zone_edit_url = admin_url('admin.php?page=wc-settings&tab=shipping&zone_id=' . $zone_id); $zone_name_html = sprintf('<a href="%s" title="Edit this shipping zone">%s</a>', esc_url($zone_edit_url), esc_html($zone->get_zone_name())); $locations = []; foreach ($zone->get_zone_locations() as $location) { $locations[] = $location->code . ':' . $location->type; } $location_str = empty($locations) ? 'Rest of the World' : implode(' | ', $locations); $methods = $zone->get_shipping_methods(true); if (empty($methods)) { $preview_zones_data[] = [ $zone_name_html, $location_str, '<em>No methods configured</em>', '', '', '' ]; $total_zone_rows++; } else { foreach ($methods as $method) { if (count($preview_zones_data) >= $preview_limit) break 2; $settings = $method->instance_settings; $cost = $settings['cost'] ?? ''; if (!empty($settings['class_costs']) && is_array($settings['class_costs'])) { foreach ($settings['class_costs'] as $slug => $class_cost) { if (count($preview_zones_data) >= $preview_limit) break 3; $preview_zones_data[] = [ $zone_name_html, $location_str, $method->get_title(), $method->id, $cost, $class_cost ]; $total_zone_rows++; } } else { $preview_zones_data[] = [ $zone_name_html, $location_str, $method->get_title(), $method->id, $cost, '' ]; $total_zone_rows++; } } } }
                     ?>
                     <h3><?php esc_html_e( 'Shipping Zones & Methods Preview', 'kiss-woo-shipping-debugger' ); ?></h3>
-                    <table class="wp-list-table widefat striped"><thead><tr><?php foreach ( $zone_headers as $header ) echo '<th scope="col">' . esc_html( $header ) . '</th>'; ?></tr></thead><tbody><?php foreach ( $preview_zones_data as $row ) { echo '<tr>'; foreach ( $row as $cell ) echo '<td>' . esc_html( $cell ) . '</td>'; echo '</tr>'; } ?></tbody></table>
+                    <table class="wp-list-table widefat striped"><thead><tr><?php foreach ( $zone_headers as $header ) echo '<th scope="col">' . esc_html( $header ) . '</th>'; ?></tr></thead><tbody><?php foreach ( $preview_zones_data as $row ) { echo '<tr>'; foreach ( $row as $cell ) echo '<td>' . wp_kses_post( $cell ) . '</td>'; echo '</tr>'; } ?></tbody></table>
                     <?php if ( $total_zone_rows > count($preview_zones_data) ) printf('<p><em>' . esc_html__('And %d more rows...', 'kiss-woo-shipping-debugger') . '</em></p>', esc_html( $total_zone_rows - count($preview_zones_data) ) ); ?>
                     
                     <hr/>
