@@ -39,7 +39,7 @@ The export is streamed directly to your browser to ensure it works on any server
 
 == Installation ==
 
-1.  Upload the `kiss-woo-shipping-settings-exporter` folder to the `/wp-content/plugins/` directory.
+1.  Upload the `kiss-woo-shipping-settings-debugger` folder to the `/wp-content/plugins/` directory.
 2.  Activate the plugin through the 'Plugins' menu in WordPress.
 3.  That's it!
 
@@ -47,24 +47,11 @@ The export is streamed directly to your browser to ensure it works on any server
 
 1.  After activating, either:
     * Navigate to your Plugins page and click the **"Export Settings"** link under the plugin's name.
-    * OR navigate to **Tools → KISS Shipping Exporter** in your WordPress admin dashboard.
+    * OR navigate to **Tools → KISS Shipping Debugger** in your WordPress admin dashboard.
 2.  Click the **"Download CSV"** button.
 3.  Your browser will download a CSV file containing all shipping data.
 
+
 == Changelog ==
 
-= 0.3.0 =
-* **Enhancement:** Plugin renamed to "KISS Woo Shipping Settings Exporter" for clarity.
-* **Enhancement:** Added a convenient "Export Settings" link on the main plugins page for one-click access.
-* **Enhancement:** Renamed the Tools menu item for consistency.
-* **Refactor:** Updated class names, function names, and text domain to align with the new plugin name. Version incremented.
-
-= 0.2.0 =
-* **Major Stability Update:** Added `set_time_limit(0)` to prevent PHP timeouts on large exports.
-* **Robustness:** The plugin now checks if WooCommerce is active before running, preventing fatal errors.
-* **Robustness:** Added a `try...catch` block and output buffering to prevent "headers already sent" errors and ensure graceful failure.
-* **Enhancement:** Now uses `wp_date()` to ensure filenames and timestamps correctly use the site's configured timezone.
-* **Enhancement:** Improved data retrieval logic to be more consistent with modern WooCommerce practices.
-
-= 0.1.0 =
-* Initial release.
+See changelog.md for detailed version history.
