@@ -7,14 +7,14 @@
  *
  * @package   KISSShippingExporter
  * @author    Your Name
- * @copyright Copyright (c) 2025 Your Name
+ * @copyright Copyright (c) 2025 KISS Plugins
  * @license   GPL-2.0+
  * @link      https://example.com/
  * @since     0.1.0
  */
 
 /**
- * Plugin Name: KISS Woo Shipping Settings Exporter
+ * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Adds a link to the plugins page and a Tool to export settings and scan the theme for custom shipping rules.
  * Version:   0.5.0
  * Author:    Your Name
