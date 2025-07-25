@@ -6,7 +6,7 @@
  * custom, code-based shipping restriction rules.
  *
  * @package   KISSShippingDebugger
- * @author    Your Name
+ * @author    KISS Plugins 
  * @copyright Copyright (c) 2025 KISS Plugins
  * @license   GPL-2.0+
  * @link      https://kissplugins.com
