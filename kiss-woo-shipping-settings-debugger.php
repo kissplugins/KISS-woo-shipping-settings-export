@@ -3,16 +3,7 @@
  * Plugin Name:       KISS WooCommerce Settings Debugger
  * Description:       A debugging tool to inspect WooCommerce shipping settings and scan for custom shipping rules.
  * Version:           1.2
- * Author:            KISS Plugins
- * Author URI:        https://kissplugins.com
- * Requires at least: 5.6
- * Requires PHP:      7.4
- * Tested up to:      6.8
- * WC requires at least: 4.0
- * WC tested up to:   8.0
- * Plugin URI:        https://kissplugins.com/kiss-woo-shipping-settings-debugger
- * Text Domain:       kiss-woo-shipping-settings-debugger
- * Domain Path:       /languages
+ * Author:            Your Name
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       kiss-woo-debugger
