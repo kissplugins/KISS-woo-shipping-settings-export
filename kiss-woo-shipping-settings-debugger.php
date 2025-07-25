@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       KISS WooCommerce Settings Debugger
  * Description:       A debugging tool to inspect WooCommerce shipping settings and scan for custom shipping rules.
- * Version:           1.2
+ * Version:           1.2.1
  * Author:            Your Name
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -13,9 +13,8 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit; // Exit if accessed directly.
 }
 
-// Include the NodeVisitor class required for AST traversal.
-// Using require_once to prevent fatal errors if somehow included twice.
-require_once __DIR__ . '/lib/RateAddCallVisitor.php';
+// NOTE: The require_once for RateAddCallVisitor.php has been moved from here
+// to prevent load-order fatal errors.
 
 /**
  * Add the debugger page to the WooCommerce admin menu.
@@ -49,7 +48,6 @@ function kiss_debugger_page_html() {
         if ( $parser_active ) {
             echo '<div class="notice notice-success"><p><strong>✅ Success:</strong> The <code>PHP-Parser</code> library is loaded and active.</p></div>';
             
-            // Render the functionality test panel since the library is active
             ?>
             <h4><span class="dashicons dashicons-beaker"></span> Parser Functionality Test</h4>
             <div style="background-color: #f6f7f7; border: 1px solid #ccc; padding: 10px 20px; margin-top: 10px; max-width: 800px;">
@@ -77,6 +75,7 @@ function kiss_debugger_page_html() {
             echo '<div class="notice notice-error"><p><strong>❌ Dependency Missing:</strong> The <code>PHP-Parser Loader</code> plugin is not active. The <strong>Custom Rules Scanner</strong> will be disabled until this dependency is installed and activated.</p></div>';
         }
         ?>
+
         <hr style="margin-top: 2em;"/>
 
         <div id="debugger-content" style="display: flex; gap: 30px; flex-wrap: wrap;">
@@ -88,7 +87,6 @@ function kiss_debugger_page_html() {
             <div id="custom-rules-scanner" style="flex: 1; min-width: 400px;">
                 <h2>Custom Rules Scanner</h2>
                 <?php
-                // Only run the scanner if the parser is active.
                 if ( $parser_active ) {
                     echo '<p>Scanning active plugins and theme for <code>add_rate</code> calls...</p>';
                     echo scan_for_custom_rules();
@@ -105,18 +103,13 @@ function kiss_debugger_page_html() {
 
 /**
  * Scans active plugins and theme for custom shipping rules.
- *
- * @return string HTML output of the scan results.
  */
 function scan_for_custom_rules() {
     $results_html = '<ul>';
     $found_files = [];
-
-    // Scan active plugins
     $active_plugins = get_option( 'active_plugins' );
     foreach ( $active_plugins as $plugin_path ) {
         $plugin_dir = WP_PLUGIN_DIR . '/' . dirname( $plugin_path );
-        // Prevent scanning the parser loader itself
         if ( strpos($plugin_dir, 'php-parser-loader') !== false ) continue;
 
         $files = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $plugin_dir ) );
@@ -134,7 +127,6 @@ function scan_for_custom_rules() {
         }
     }
 
-    // Prepare output
     if ( ! empty( $found_files ) ) {
         foreach ( $found_files as $file ) {
             $short_path = str_replace( ABSPATH, '', $file['path'] );
@@ -155,15 +147,15 @@ function scan_for_custom_rules() {
 
 /**
  * Phase 1: New function using PHP-Parser to scan a file.
- *
- * @param string $file_path The full path to the PHP file to scan.
- * @return array An array of found rules with their line numbers.
  */
 function scan_file_for_rules_ast( $file_path ) {
     $found_rules = [];
     if ( ! class_exists('PhpParser\\ParserFactory') || ! file_exists( $file_path ) ) {
         return $found_rules;
     }
+
+    // *** FIX: Include the visitor class only when we know the parser is ready. ***
+    require_once __DIR__ . '/lib/RateAddCallVisitor.php';
 
     $code = file_get_contents( $file_path );
     if ( empty( $code ) ) {
@@ -189,18 +181,15 @@ function scan_file_for_rules_ast( $file_path ) {
     } catch ( PhpParser\Error $e ) {
         // Skip files that fail to parse.
     }
-
     return $found_rules;
 }
 
 /**
  * Fetches and formats the shipping methods settings for display.
- * @return string HTML table of the settings.
  */
 function get_shipping_methods_settings_html() {
     global $wpdb;
     $results = $wpdb->get_results( "SELECT option_name, option_value FROM {$wpdb->prefix}options WHERE option_name LIKE 'woocommerce_%_settings'" );
-
     if ( empty( $results ) ) {
         return '<p>No WooCommerce shipping settings were found in the options table.</p>';
     }
@@ -214,6 +203,5 @@ function get_shipping_methods_settings_html() {
         $output .= '</tr>';
     }
     $output .= '</tbody></table>';
-
     return $output;
 }
