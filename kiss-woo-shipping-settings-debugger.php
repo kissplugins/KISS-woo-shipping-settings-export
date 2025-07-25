@@ -6,18 +6,19 @@
  * custom, code-based shipping restriction rules.
  *
  * @package   KISSShippingDebugger
- * @author    Your Name
+ * @author    KISS Plugins 
  * @copyright Copyright (c) 2025 KISS Plugins
  * @license   GPL-2.0+
- * @link      https://example.com/
+ * @link      https://kissplugins.com
  * @since     0.1.0
  */
 
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Adds a link to the plugins page and a Tool to export settings and scan the theme for custom shipping rules.
- * Version:   0.6.0
- * Author:    Your Name
+ * Version:   0.7.0
+ * Author:    KISS Plugins
+ * Author URI: https://kissplugins.com
  * License:   GPL-2.0+
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -71,110 +72,119 @@ if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
         }
 
         /**
-         * Scans the theme for the custom shipping restrictions file and renders the results.
-         * @since 0.5.0
+         * Scans theme files for custom shipping rules and renders the results.
+         * @since 0.7.0 - Added support for additional file and improved cost analysis.
          */
-        private function scan_and_render_custom_rules(): void {
-            echo '<h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
-
-            $file_path = get_stylesheet_directory() . '/inc/shipping-restrictions.php';
-
-            if ( ! file_exists( $file_path ) ) {
-                printf( '<p>%s</p>', esc_html__( 'Custom shipping file not found at:', 'kiss-woo-shipping-debugger' ) );
-                echo '<code>' . esc_html( $file_path ) . '</code>';
-                return;
+        private function scan_and_render_custom_rules(?string $additional_file_relative = null): void {
+            $files_to_scan = [ get_stylesheet_directory() . '/inc/shipping-restrictions.php' ];
+        
+            if ( $additional_file_relative ) {
+                $clean_path = '/' . ltrim( wp_normalize_path( $additional_file_relative ), '/' );
+                $full_path = get_stylesheet_directory() . $clean_path;
+                if ( ! in_array( $full_path, $files_to_scan, true ) ) {
+                    $files_to_scan[] = $full_path;
+                }
             }
-
-            printf( '<p>%s</p>', esc_html__( 'The following programmatic rules were found in your theme. Note: This is a best-effort analysis and may not capture all custom logic.', 'kiss-woo-shipping-debugger' ) );
-            echo '<code>' . esc_html( $file_path ) . '</code>';
-
-            $contents = file_get_contents( $file_path );
-            $tokens = token_get_all( $contents );
-
-            $rules = [];
-            $current_context = 'none';
-
-            foreach ( $tokens as $i => $token ) {
-                if ( ! is_array( $token ) ) continue;
-
-                // Detect state-based rules
-                if ( $token[0] === T_IF ) {
-                    if ( isset( $tokens[$i+2][1] ) && $tokens[$i+2][1] === '$state' && isset( $tokens[$i+4][1] ) ) {
+        
+            foreach ( $files_to_scan as $file_path ) {
+                printf( '<h3>Scanning File: <code>%s</code></h3>', esc_html( wp_make_link_relative( $file_path ) ) );
+        
+                if ( ! file_exists( $file_path ) ) {
+                    printf( '<p><em>%s</em></p>', esc_html__( 'File not found.', 'kiss-woo-shipping-debugger' ) );
+                    continue;
+                }
+        
+                printf( '<p>%s</p>', esc_html__( 'The following programmatic rules were found. Note: This is a best-effort analysis and may not capture all custom logic.', 'kiss-woo-shipping-debugger' ) );
+        
+                $contents = file_get_contents( $file_path );
+                $tokens = token_get_all( $contents );
+                $rules = [];
+        
+                foreach ( $tokens as $i => $token ) {
+                    if ( ! is_array( $token ) ) continue;
+        
+                    // --- Existing Detections ---
+                    if ( $token[0] === T_IF && isset( $tokens[$i+2][1] ) && $tokens[$i+2][1] === '$state' && isset( $tokens[$i+4][1] ) ) {
                         $state_code = str_replace("'", "", $tokens[$i+4][1]);
                         $rules[] = ['type' => 'context', 'value' => "For State: <strong>" . esc_html( $state_code ) . "</strong>"];
                     }
-                }
-                
-                // Detect `is_binoidcbd()` or similar contexts
-                if ( $token[0] === T_STRING && in_array( $token[1], ['is_binoidcbd', 'is_bloomz'] ) ) {
-                     $rules[] = ['type' => 'context', 'value' => "When `{$token[1]}()` is true:"];
-                }
-                
-                // Detect category restrictions via `has_term`
-                if ($token[0] === T_STRING && $token[1] === 'has_term') {
-                    if (isset($tokens[$i+2][1]) && $tokens[$i+2][0] === T_ARRAY) {
-                        $array_content = '';
-                        for ($j = $i + 3; $j < count($tokens); $j++) {
-                            if ($tokens[$j] === ')') break;
-                            $array_content .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
+                    if ( $token[0] === T_STRING && in_array( $token[1], ['is_binoidcbd', 'is_bloomz'] ) ) {
+                        $rules[] = ['type' => 'context', 'value' => "When `{$token[1]}()` is true:"];
+                    }
+                    if ($token[0] === T_STRING && $token[1] === 'has_term') {
+                        // Simplified 'has_term' detection
+                        $rules[] = ['type' => 'rule', 'value' => "Checks for product categories using `has_term`."];
+                    }
+                    if ($token[0] === T_STRING && $token[1] === '__') {
+                        if (isset($tokens[$i+2]) && $tokens[$i+2][0] === T_CONSTANT_ENCAPSED_STRING) {
+                           $message = trim($tokens[$i+2][1], "'\"");
+                           if ( !empty($message) && trim($message) !== '.' ) {
+                                $rules[] = ['type' => 'message', 'value' => 'Displays message: <em>"' . esc_html($message) . '"</em>'];
+                           }
                         }
-                        $cats = str_replace(["'", ' '], '', trim($array_content, '()'));
-                        $rules[] = ['type' => 'rule', 'value' => "Checks for product categories: <code>" . esc_html($cats) . "</code>"];
+                    }
+                    if ($token[0] === T_VARIABLE && in_array($token[1], ['$restricted_states', '$restricted_postcodes', '$restricted_postcodes_kratom'])) {
+                         $rules[] = ['type' => 'array', 'value' => "Found restriction array <code>{$token[1]}</code>."];
+                    }
+        
+                    // --- New Detections for Shipping Costs & Rules ---
+                    if ($token[0] === T_STRING && $token[1] === 'add_filter' && isset($tokens[$i+2][1]) && trim($tokens[$i+2][1], "'\"") === 'woocommerce_package_rates') {
+                        $rules[] = ['type' => 'context', 'value' => "Modifies rates via <code>woocommerce_package_rates</code> hook."];
+                    }
+                    if ( $token[0] === T_UNSET && isset($tokens[$i+2][1]) && strpos($tokens[$i+2][1], '$rates') !== false ) {
+                        $rules[] = ['type' => 'rule', 'value' => 'Conditionally removes a shipping rate (e.g., <code>unset($rates[...])</code>).'];
+                    }
+                    if ($token[0] === T_OBJECT_OPERATOR && isset($tokens[$i+1][1]) && $tokens[$i+1][1] === 'cost') {
+                        if (isset($tokens[$i+2]) && is_string($tokens[$i+2]) && $tokens[$i+2] === '=') {
+                            $rules[] = ['type' => 'rule', 'value' => 'Directly sets a shipping rate cost (e.g., <code>$rate->cost = ...</code>).'];
+                        } elseif (isset($tokens[$i+2]) && is_array($tokens[$i+2]) && in_array($tokens[$i+2][0], [T_PLUS_EQUAL, T_MINUS_EQUAL])) {
+                            $rules[] = ['type' => 'rule', 'value' => "Modifies a shipping rate cost (e.g., <code>cost += / -=</code>)."];
+                        }
+                    }
+                    if ($token[0] === T_NEW && isset($tokens[$i+2][1]) && $tokens[$i+2][1] === 'WC_Shipping_Rate') {
+                        $rules[] = ['type' => 'rule', 'value' => 'Programmatically adds a new shipping rate (<code>new WC_Shipping_Rate()</code>).'];
                     }
                 }
-
-                /**
-                 * Detect error messages being added.
-                 * @since 0.6.0 - Improved to be more descriptive and handle empty placeholders.
-                 */
-                if ($token[0] === T_STRING && $token[1] === '__') {
-                     if (isset($tokens[$i+2]) && $tokens[$i+2][0] === T_CONSTANT_ENCAPSED_STRING) {
-                        $message = trim($tokens[$i+2][1], "'\"");
-                        if ( !empty($message) && trim($message) !== '.' ) {
-                             $rules[] = ['type' => 'message', 'value' => 'Displays message: <em>"' . esc_html($message) . '"</em>'];
-                        } else {
-                             $rules[] = ['type' => 'message', 'value' => '<em>(Note: A placeholder or empty message string was detected here.)</em>'];
-                        }
-                     }
-                }
-
-                // Detect array definitions for states/postcodes
-                if ($token[0] === T_VARIABLE && in_array($token[1], ['$restricted_states', '$restricted_postcodes', '$restricted_postcodes_kratom'])) {
-                    $array_content = '';
-                    for ($j = $i + 2; $j < count($tokens); $j++) {
-                        if (is_string($tokens[$j]) && $tokens[$j] === ';') break;
-                        $array_content .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
+                
+                if (!empty($rules)) {
+                    echo '<ul class="ul-disc" style="margin-left: 20px;">';
+                    foreach ($rules as $rule) {
+                        $style = 'padding-left: 10px;';
+                        if ($rule['type'] === 'context') $style = 'font-weight: bold; margin-top: 1em;';
+                        if ($rule['type'] === 'message') $style .= 'padding-left: 20px; font-style: italic;';
+                        echo '<li style="' . esc_attr($style) . '">' . wp_kses_post($rule['value']) . '</li>';
                     }
-                    preg_match_all("/'([^']*)'/", $array_content, $matches);
-                    $count = count($matches[1]) / 2;
-                    $rules[] = ['type' => 'array', 'value' => "Found restriction array <code>{$token[1]}</code> with <strong>" . (int) $count . "</strong> entries."];
+                    echo '</ul>';
+                } else {
+                    echo '<p>' . esc_html__('Could not automatically detect any known rule patterns in this file.', 'kiss-woo-shipping-debugger' ) . '</p>';
                 }
-            }
-            
-            // Render the discovered rules
-            if (!empty($rules)) {
-                echo '<ul class="ul-disc" style="margin-left: 20px;">';
-                foreach ($rules as $rule) {
-                    $style = 'padding-left: 10px;';
-                    if ($rule['type'] === 'context') $style = 'font-weight: bold; margin-top: 1em;';
-                    if ($rule['type'] === 'message') $style .= 'padding-left: 20px; font-style: italic;';
-                    
-                    echo '<li style="' . esc_attr($style) . '">' . wp_kses_post($rule['value']) . '</li>';
-                }
-                echo '</ul>';
-            } else {
-                echo '<p>' . esc_html__('Could not automatically detect any rules from the file.', 'kiss-woo-shipping-debugger' ) . '</p>';
             }
         }
+        
 
         public function render_page(): void {
             $submit_button_html = sprintf( '<p><button type="submit" class="button button-primary button-large">%s</button></p>', esc_html__( 'Download CSV of UI Settings', 'kiss-woo-shipping-debugger' ) );
+            $additional_file = isset($_GET['wse_additional_file']) ? sanitize_text_field(wp_unslash($_GET['wse_additional_file'])) : '';
             ?>
             <div class="wrap">
                 <h1><?php esc_html_e( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ); ?></h1>
                 
                 <hr/>
-                <?php $this->scan_and_render_custom_rules(); ?>
+                <div class="rules-scanner-wrapper">
+                    <h2><?php esc_html_e( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ); ?></h2>
+                    <p><?php esc_html_e( 'This tool scans your active theme for files containing programmatic shipping rules. It checks a default file and allows you to specify an additional one to scan.', 'kiss-woo-shipping-debugger' ); ?></p>
+                    
+                    <form method="get" style="padding: 1em; border: 1px solid #c3c4c7; background: #fff;">
+                        <input type="hidden" name="page" value="<?php echo esc_attr( $this->page_slug ); ?>">
+                        <p style="margin-top: 0;">
+                            <label for="wse_additional_file"><strong><?php esc_html_e( 'Scan Additional Theme File (Optional)', 'kiss-woo-shipping-debugger' ); ?></strong></label><br>
+                            <span style="font-family: monospace; font-size: 0.9em;"><?php echo esc_html( get_stylesheet_directory() ); ?></span><input type="text" name="wse_additional_file" id="wse_additional_file" class="regular-text" style="width: auto; max-width: 400px;" placeholder="/inc/woo-functions.php" value="<?php echo esc_attr( $additional_file ); ?>">
+                        </p>
+                        <p style="margin-bottom: 0;"><button type="submit" class="button"><?php esc_html_e( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ); ?></button></p>
+                    </form>
+                    
+                    <?php $this->scan_and_render_custom_rules( $additional_file ); ?>
+                </div>
                 <hr/>
 
                 <h2><?php esc_html_e( 'UI-Based Settings Export', 'kiss-woo-shipping-debugger' ); ?></h2>
@@ -203,7 +213,6 @@ if ( ! class_exists( 'KISS_WSE_Debugger' ) ) {
             <?php
         }
         
-        // Unchanged handle_export method...
         public function handle_export(): void {
             if ( ! current_user_can( 'manage_woocommerce' ) ) { wp_die( __( 'Sorry, you are not allowed to export this data.', 'kiss-woo-shipping-debugger' ) ); }
             check_admin_referer( $this->page_slug, 'wse_nonce' );

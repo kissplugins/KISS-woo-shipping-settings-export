@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0  
+
+Additional File Scanning: On the "KISS Shipping Debugger" tools page, you will now find a field to enter the path to an additional file within your theme folder (e.g., /inc/woo-functions.php) to scan for rules.
+
+Enhanced Rule Interpretation: The scanner is now more powerful and can detect:
+
+Functions that hook into woocommerce_package_rates to modify shipping prices.
+
+Direct cost modifications (e.g., $rate->cost = 10;).
+
+Cost additions/subtractions (e.g., $rate->cost += 5;).
+
+Rules that programmatically unset() or remove a shipping method.
+
+The creation of new shipping rates using new WC_Shipping_Rate().
+
+Improved UI: The scanner results are now organized by the file they were found in, making the output clearer when scanning multiple files.
+
+
 ## 0.6.0
 * **Enhancement:** The "Zone Name" in the UI settings preview table is now a direct link to the corresponding WooCommerce shipping zone editor page.
 * **Enhancement:** The Custom Rules Scanner now provides a descriptive message for empty or placeholder translation strings, preventing empty bullet points in the output.
