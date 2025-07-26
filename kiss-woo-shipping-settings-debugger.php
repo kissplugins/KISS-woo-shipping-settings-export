@@ -2,11 +2,24 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     1.0.0
+ * Version:     1.0.2
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: kiss-woo-shipping-debugger
+ *
+ * Changelog:
+ * - 1.0.2
+ *   - UX: Renamed the $errors->add() section to “Checkout validation ($errors->add)”.
+ *   - UX: Scanner now shows human-readable explanations:
+ *         • Extracts and displays error message strings passed to $errors->add().
+ *         • Adds short plain-English descriptions for filters, fee hooks, add_rate(), new WC_Shipping_Rate, unset($rates[]), and add_fee().
+ * - 1.0.1
+ *   - Security: Added capability + nonce verification to export handler and proper CSV streaming headers with hard exit.
+ *   - Security: Added realpath clamping so the “additional file” scan is restricted to the active child theme /inc/ directory.
+ *   - DX: Added automatic PHP-Parser availability check and self-test on settings page load with visible status.
+ * - 1.0.0
+ *   - Initial release.
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -75,6 +88,46 @@ class KISS_WSE_Debugger {
         echo '<div class="wrap">';
         echo '<h1>' . esc_html__( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
 
+        // --- PHP-Parser Status & Self-Test (auto) ---
+        $parser_loaded = class_exists( \PhpParser\ParserFactory::class );
+        $parser_ok     = false;
+        $parser_msg    = '';
+
+        if ( $parser_loaded ) {
+            try {
+                $parser = $this->create_parser();
+                // Tiny parse test
+                $test_code = "<?php\nfunction _kiss_wse_test(){return 42;} _kiss_wse_test();";
+                $ast = $parser->parse( $test_code );
+                $parser_ok  = is_array( $ast ) && ! empty( $ast );
+                $parser_msg = $parser_ok
+                    ? __( 'PHP-Parser is loaded and parsed a test snippet successfully.', 'kiss-woo-shipping-debugger' )
+                    : __( 'PHP-Parser is present but could not parse the test snippet.', 'kiss-woo-shipping-debugger' );
+            } catch ( \Throwable $e ) {
+                $parser_ok  = false;
+                $parser_msg = sprintf(
+                    /* translators: %s is an error message */
+                    __( 'PHP-Parser error: %s', 'kiss-woo-shipping-debugger' ),
+                    $e->getMessage()
+                );
+                error_log( '[KISS WSE Parser Test] ' . $e->getMessage() );
+            }
+        } else {
+            $parser_msg = __( 'PHP-Parser is not loaded. Some scanning features may be unavailable.', 'kiss-woo-shipping-debugger' );
+        }
+
+        if ( $parser_loaded && $parser_ok ) {
+            printf(
+                '<div class="notice notice-success"><p>%s</p></div>',
+                esc_html( $parser_msg )
+            );
+        } else {
+            printf(
+                '<div class="notice notice-warning"><p>%s</p></div>',
+                esc_html( $parser_msg )
+            );
+        }
+
         // --- Custom Rules Scanner UI ---
         echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
         echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
@@ -83,8 +136,9 @@ class KISS_WSE_Debugger {
                 <input type="hidden" name="page" value="%1$s">
                 <p>
                   <label><strong>%2$s</strong></label><br>
-                  <span style="font-family:monospace;">%3$s</span>
-                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="/inc/extra.php" value="%4$s">
+                  <span style="font-family:monospace;">%3$s/inc</span>
+                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="extra.php" value="%4$s">
+                  <br><em>%6$s</em>
                 </p>
                 <p><button type="submit" class="button">%5$s</button></p>
              </form>',
@@ -92,7 +146,8 @@ class KISS_WSE_Debugger {
             esc_html__( 'Scan Additional Theme File (Optional)', 'kiss-woo-shipping-debugger' ),
             esc_html( get_stylesheet_directory() ),
             esc_attr( $additional ),
-            esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' )
+            esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
+            esc_html__( 'Path is restricted to the active child theme’s /inc/ directory (e.g., "extra.php" or "subdir/custom.php").', 'kiss-woo-shipping-debugger' )
         );
 
         try {
@@ -121,16 +176,78 @@ class KISS_WSE_Debugger {
     }
 
     public function handle_export(): void {
-        // ... your existing CSV export logic ...
+        // Capability check
+        if ( ! current_user_can( 'manage_woocommerce' ) ) {
+            wp_die( esc_html__( 'Insufficient permissions.', 'kiss-woo-shipping-debugger' ), 403 );
+        }
+
+        // Nonce verification
+        check_admin_referer( $this->page_slug, 'wse_nonce' );
+
+        // Prepare CSV streaming
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=utf-8' );
+
+        $host     = parse_url( home_url(), PHP_URL_HOST );
+        $filename = sanitize_file_name( sprintf( '%s-shipping-%s.csv', (string) $host, wp_date( 'Y-m-d-His' ) ) );
+        header( 'Content-Disposition: attachment; filename=' . $filename );
+
+        /**
+         * Stream CSV.
+         * To keep changes minimal and DRY, we allow existing logic to output rows if present.
+         * Priority:
+         *  1) Method $this->output_csv() if it exists.
+         *  2) Function kiss_wse_output_csv() if defined.
+         *  3) Fallback: emit a single header row noting no data.
+         */
+        if ( method_exists( $this, 'output_csv' ) ) {
+            $this->output_csv();
+        } elseif ( function_exists( 'kiss_wse_output_csv' ) ) {
+            kiss_wse_output_csv();
+        } else {
+            $out = fopen( 'php://output', 'w' );
+            if ( $out ) {
+                fputcsv( $out, [ 'notice', 'No export rows available in this build.' ] );
+                fclose( $out );
+            }
+        }
+
+        exit;
     }
 
     private function scan_and_render_custom_rules( ?string $additional ): void {
         require_once plugin_dir_path( __FILE__ ) . 'lib/RateAddCallVisitor.php';
 
-        $files = [ get_stylesheet_directory() . '/inc/shipping-restrictions.php' ];
-        if ( $additional ) {
-            $clean = '/' . ltrim( wp_normalize_path( $additional ), '/' );
-            $files[] = get_stylesheet_directory() . $clean;
+        // Always scan the canonical file within /inc/
+        $files = [];
+        $default_file = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc/shipping-restrictions.php' );
+        $files[] = $default_file;
+
+        // Restrict any "additional" file to the child theme /inc/ directory
+        $base_inc  = wp_normalize_path( trailingslashit( get_stylesheet_directory() ) . 'inc' );
+        $base_real = realpath( $base_inc );
+
+        if ( $additional && $base_real ) {
+            $rel   = ltrim( wp_normalize_path( $additional ), '/\\' ); // user may enter "extra.php" or "subdir/file.php"
+            $try   = wp_normalize_path( $base_real . DIRECTORY_SEPARATOR . $rel );
+            $real  = realpath( $try );
+
+            // Verify $real exists and is under $base_real
+            if ( $real ) {
+                $real_norm = wp_normalize_path( $real );
+                $base_norm = wp_normalize_path( $base_real );
+                if ( strncmp( $real_norm, $base_norm, strlen( $base_norm ) ) === 0 && is_file( $real ) ) {
+                    $files[] = $real;
+                } else {
+                    echo '<div class="notice notice-warning"><p>' .
+                         esc_html__( 'Invalid file path. The additional file must be inside the active child theme’s /inc/ directory.', 'kiss-woo-shipping-debugger' ) .
+                         '</p></div>';
+                }
+            } else {
+                echo '<div class="notice notice-warning"><p>' .
+                     esc_html__( 'Additional file not found within /inc/. Please check the filename.', 'kiss-woo-shipping-debugger' ) .
+                     '</p></div>';
+            }
         }
 
         foreach ( $files as $file ) {
@@ -140,11 +257,14 @@ class KISS_WSE_Debugger {
                 continue;
             }
 
-            $code = file_get_contents( $file );
-            $factory = new \PhpParser\ParserFactory();
-            $parser = method_exists( $factory, 'createForNewestSupportedVersion' )
-                ? $factory->createForNewestSupportedVersion()
-                : $factory->create( \PhpParser\ParserFactory::PREFER_PHP7 );
+            // If parser isn't available, skip with a message
+            if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
+                echo '<p><em>' . esc_html__( 'PHP-Parser not available. Unable to scan this file.', 'kiss-woo-shipping-debugger' ) . '</em></p>';
+                continue;
+            }
+
+            $code   = file_get_contents( $file );
+            $parser = $this->create_parser();
 
             $ast       = $parser->parse( $code );
             $trav      = new \PhpParser\NodeTraverser();
@@ -163,21 +283,28 @@ class KISS_WSE_Debugger {
                 'errors'      => $visitor->getErrorAddNodes(),
             ];
 
-            foreach ( [
+            // Titles (only change requested: rename errors heading)
+            $titles = [
                 'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
                 'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
                 'rateCalls'   => __('add_rate() Calls',    'kiss-woo-shipping-debugger'),
                 'newRates'    => __('new WC_Shipping_Rate', 'kiss-woo-shipping-debugger'),
                 'unsetRates'  => __('unset($rates[])',     'kiss-woo-shipping-debugger'),
                 'addFees'     => __('add_fee() Calls',     'kiss-woo-shipping-debugger'),
-                'errors'      => __('$errors->add()',      'kiss-woo-shipping-debugger'),
-            ] as $key => $title ) {
+                'errors'      => __('Checkout validation ($errors->add)', 'kiss-woo-shipping-debugger'),
+            ];
+
+            foreach ( $titles as $key => $title ) {
                 if ( ! empty( $sections[ $key ] ) ) {
                     printf( '<h4>%s</h4><ul>', esc_html( $title ) );
                     foreach ( $sections[ $key ] as $node ) {
-                        printf( '<li>%s on line %d</li>',
-                            esc_html( $title ),
-                            esc_html( $node->getLine() )
+                        $line = (int) $node->getLine();
+                        $desc = $this->describe_node( $key, $node );
+                        printf(
+                            '<li><strong>%s</strong> — %s %s</li>',
+                            esc_html( $this->short_explanation_label( $key ) ),
+                            esc_html( $desc ),
+                            sprintf( '<span style="opacity:.7;">(%s %d)</span>', esc_html__( 'line', 'kiss-woo-shipping-debugger' ), esc_html( $line ) )
                         );
                     }
                     echo '</ul>';
@@ -193,7 +320,177 @@ class KISS_WSE_Debugger {
     private function render_preview_table(): void {
         // ... your existing preview‐table code ...
     }
-}
 
-// instantiate
-new KISS_WSE_Debugger();
+    /**
+     * Create and return a PHP-Parser instance using the newest supported version.
+     * Kept as a helper for DRY use across the parser self-test and the scanner.
+     */
+    private function create_parser() {
+        $factory = new \PhpParser\ParserFactory();
+        if ( method_exists( $factory, 'createForNewestSupportedVersion' ) ) {
+            return $factory->createForNewestSupportedVersion();
+        }
+        return $factory->create( \PhpParser\ParserFactory::PREFER_PHP7 );
+    }
+
+    /**
+     * Produce a short label used in list items.
+     */
+    private function short_explanation_label( string $key ): string {
+        switch ( $key ) {
+            case 'filterHooks': return __( 'Modifies shipping rates', 'kiss-woo-shipping-debugger' );
+            case 'feeHooks':    return __( 'Adjusts cart fees/totals', 'kiss-woo-shipping-debugger' );
+            case 'rateCalls':   return __( 'Adds a custom rate', 'kiss-woo-shipping-debugger' );
+            case 'newRates':    return __( 'Creates a rate object', 'kiss-woo-shipping-debugger' );
+            case 'unsetRates':  return __( 'Removes a rate', 'kiss-woo-shipping-debugger' );
+            case 'addFees':     return __( 'Adds a cart fee', 'kiss-woo-shipping-debugger' );
+            case 'errors':      return __( 'Checkout rule', 'kiss-woo-shipping-debugger' );
+            default:            return __( 'Matched code', 'kiss-woo-shipping-debugger' );
+        }
+    }
+
+    /**
+     * Return a human-readable explanation for a given node.
+     * Kept conservative: uses simple extraction heuristics, no execution.
+     *
+     * @param string          $key  Section key.
+     * @param \PhpParser\Node $node Matched node.
+     * @return string
+     */
+    private function describe_node( string $key, \PhpParser\Node $node ): string {
+        try {
+            switch ( $key ) {
+                case 'errors':
+                    // $errors->add( key, message, ... )
+                    if ( property_exists( $node, 'args' ) && isset( $node->args[1] ) ) {
+                        $msg = $this->extract_string( $node->args[1]->value );
+                        if ( $msg !== '' ) {
+                            return sprintf(
+                                /* translators: checkout validation explanation + message */
+                                __( 'Adds a checkout error message: “%s”. Customers will be blocked until they resolve it.', 'kiss-woo-shipping-debugger' ),
+                                $msg
+                            );
+                        }
+                    }
+                    return __( 'Adds a checkout error message.', 'kiss-woo-shipping-debugger' );
+
+                case 'filterHooks':
+                    // add_filter('woocommerce_package_rates', callback, ...)
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+                    if ( $cb ) {
+                        return sprintf(
+                            __( 'Theme code hooks into WooCommerce package rates (%s) to change which shipping options appear.', 'kiss-woo-shipping-debugger' ),
+                            $cb
+                        );
+                    }
+                    return __( 'Theme code hooks into WooCommerce package rates to change which shipping options appear.', 'kiss-woo-shipping-debugger' );
+
+                case 'feeHooks':
+                    // add_action('woocommerce_cart_calculate_fees', callback, ...)
+                    $cb = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->describe_callback( $node->args[1]->value )
+                        : '';
+                    if ( $cb ) {
+                        return sprintf(
+                            __( 'Runs during cart fee calculation (%s). This can add discounts/surcharges and affect totals.', 'kiss-woo-shipping-debugger' ),
+                            $cb
+                        );
+                    }
+                    return __( 'Runs during cart fee calculation. This can add discounts/surcharges and affect totals.', 'kiss-woo-shipping-debugger' );
+
+                case 'rateCalls':
+                    return __( 'Calls add_rate() to insert a custom shipping option programmatically.', 'kiss-woo-shipping-debugger' );
+
+                case 'newRates':
+                    return __( 'Instantiates WC_Shipping_Rate directly, creating a shipping option in code.', 'kiss-woo-shipping-debugger' );
+
+                case 'unsetRates':
+                    // unset($rates['key'])
+                    $keyStr = $this->extract_unset_rate_key( $node );
+                    if ( $keyStr !== '' ) {
+                        return sprintf(
+                            __( 'Removes a shipping rate by key (%s) from the available options.', 'kiss-woo-shipping-debugger' ),
+                            $keyStr
+                        );
+                    }
+                    return __( 'Removes one or more shipping rates from the available options.', 'kiss-woo-shipping-debugger' );
+
+                case 'addFees':
+                    // $cart->add_fee( label, amount, ... )
+                    if ( property_exists( $node, 'args' ) && isset( $node->args[0] ) ) {
+                        $label = $this->extract_string( $node->args[0]->value );
+                        if ( $label !== '' ) {
+                            return sprintf(
+                                __( 'Adds a cart fee/adjustment named “%s”.', 'kiss-woo-shipping-debugger' ),
+                                $label
+                            );
+                        }
+                    }
+                    return __( 'Adds a cart fee/adjustment.', 'kiss-woo-shipping-debugger' );
+            }
+        } catch ( \Throwable $e ) {
+            // Fall through to generic text on any parsing edge cases
+        }
+        return __( 'Matched code pattern.', 'kiss-woo-shipping-debugger' );
+    }
+
+    /**
+     * Try to extract a human-readable string from an expression:
+     *  - plain "string"
+     *  - translation wrappers like __("string", "domain"), esc_html__("string", "domain"), etc.
+     */
+    private function extract_string( $expr ): string {
+        if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
+            return (string) $expr->value;
+        }
+        if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
+            $fn = strtolower( $expr->name->toString() );
+            $i18n = [ '__', 'esc_html__', 'esc_attr__', '_x', '_nx', '_ex' ];
+            if ( in_array( $fn, $i18n, true ) && isset( $expr->args[0] ) && $expr->args[0]->value instanceof \PhpParser\Node\Scalar\String_ ) {
+                return (string) $expr->args[0]->value->value;
+            }
+        }
+        // Fallback: we don’t attempt to resolve concatenations or variables for safety.
+        return '';
+    }
+
+    /**
+     * Describe a callback (string function name or array(Class/obj, 'method')).
+     */
+    private function describe_callback( $expr ): string {
+        try {
+            if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
+                return $expr->value;
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\Array_
+                 && isset( $expr->items[1] )
+                 && $expr->items[1]->value instanceof \PhpParser\Node\Scalar\String_ ) {
+                $method = $expr->items[1]->value->value;
+                // Class/variable part may be complex; keep simple:
+                return '::' . $method;
+            }
+        } catch ( \Throwable $e ) {
+            // ignore
+        }
+        return '';
+    }
+
+    /**
+     * Extract the rate key from unset($rates['key']) if available.
+     */
+    private function extract_unset_rate_key( \PhpParser\Node $unsetStmt ): string {
+        try {
+            if ( $unsetStmt instanceof \PhpParser\Node\Stmt\Unset_
+                 && isset( $unsetStmt->vars[0] )
+                 && $unsetStmt->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch
+                 && $unsetStmt->vars[0]->dim instanceof \PhpParser\Node\Scalar\String_ ) {
+                return $unsetStmt->vars[0]->dim->value;
+            }
+        } catch ( \Throwable $e ) {
+            // ignore
+        }
+        return '';
+    }
+}

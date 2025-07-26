@@ -11,19 +11,26 @@ use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Expr\New_;
-use PhpParser\Node\Expr\Unset_;
+use PhpParser\Node\Stmt\Unset_;
 use PhpParser\Node\Expr\ArrayDimFetch;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Name;
 use PhpParser\Node\Identifier;
 
 class RateAddCallVisitor extends NodeVisitorAbstract {
+    /** @var Node[] */
     private array $addRateNodes    = [];
+    /** @var Node[] */
     private array $filterHookNodes = [];
+    /** @var Node[] */
     private array $feeHookNodes    = [];
+    /** @var Node[] */
     private array $errorAddNodes   = [];
+    /** @var Node[] */
     private array $unsetRateNodes  = [];
+    /** @var Node[] */
     private array $newRateNodes    = [];
+    /** @var Node[] */
     private array $addFeeNodes     = [];
 
     public function enterNode(Node $node) {

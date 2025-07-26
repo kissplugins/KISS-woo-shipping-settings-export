@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+* **Security:** Added capability check (`manage_woocommerce`) and nonce verification to the CSV export handler, with proper CSV streaming headers and a hard `exit;` after output.
+* **Security:** Restricted “additional file” scanning to the active child theme’s `/inc/` directory using `realpath` clamping and base‐path verification.
+* **Developer Experience:** Settings page now automatically detects whether PHP-Parser is loaded and performs a self-test on page load, displaying the result via an admin notice.
+* **Correctness:** Fixed `RateAddCallVisitor` imports and node usage:
+  * Added missing `use` statements for `PhpParser\Node\Name` and `PhpParser\Node\Identifier`.
+  * Corrected `Unset_` to `PhpParser\Node\Stmt\Unset_` (was incorrectly under `Expr`).
+  * Declared typed array properties for collected node lists to avoid dynamic properties on newer PHP versions.
+
 ## 1.0.0
 * **Refactor:** Switched from native `token_get_all()` scanning to a full PHP-Parser AST–based analysis for theme files.
 * **Feature:** Dynamically discover and require `php-parser-loader.php` from any active plugin folder.
