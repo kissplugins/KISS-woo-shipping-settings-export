@@ -1,23 +1,21 @@
 # Changelog
 
-## 0.7.0  
+## 1.0.0
+* **Refactor:** Switched from native `token_get_all()` scanning to a full PHP-Parser AST–based analysis for theme files.
+* **Feature:** Dynamically discover and require `php-parser-loader.php` from any active plugin folder.
+* **Enhancement:** Unified UI-settings export (CSV download and preview table) and AST-based code scanner into a single plugin file.
+* **Improvement:** Updated the “Custom Rules Scanner” visitor to report precise `add_rate()` calls by AST node and line number.
+* **Maintenance:** Bumped minimum WP/PHP requirements (WP 6.0+, PHP 7.4+) and versioned to 1.0.0 for the AST migration release.
 
-Additional File Scanning: On the "KISS Shipping Debugger" tools page, you will now find a field to enter the path to an additional file within your theme folder (e.g., /inc/woo-functions.php) to scan for rules.
-
-Enhanced Rule Interpretation: The scanner is now more powerful and can detect:
-
-Functions that hook into woocommerce_package_rates to modify shipping prices.
-
-Direct cost modifications (e.g., $rate->cost = 10;).
-
-Cost additions/subtractions (e.g., $rate->cost += 5;).
-
-Rules that programmatically unset() or remove a shipping method.
-
-The creation of new shipping rates using new WC_Shipping_Rate().
-
-Improved UI: The scanner results are now organized by the file they were found in, making the output clearer when scanning multiple files.
-
+## 0.7.0
+* **Additional File Scanning:** On the "KISS Shipping Debugger" tools page, you will now find a field to enter the path to an additional file within your theme folder (e.g., `/inc/woo-functions.php`) to scan for rules.
+* **Enhanced Rule Interpretation:** The scanner is now more powerful and can detect:
+  * Functions that hook into `woocommerce_package_rates` to modify shipping prices.
+  * Direct cost modifications (e.g., `$rate->cost = 10;`).
+  * Cost additions/subtractions (e.g., `$rate->cost += 5;`).
+  * Rules that programmatically `unset()` or remove a shipping method.
+  * The creation of new shipping rates using `new WC_Shipping_Rate()`.
+* **Improved UI:** The scanner results are now organized by the file they were found in, making the output clearer when scanning multiple files.
 
 ## 0.6.0
 * **Enhancement:** The "Zone Name" in the UI settings preview table is now a direct link to the corresponding WooCommerce shipping zone editor page.
