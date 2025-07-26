@@ -2,13 +2,31 @@
 /**
  * Plugin Name: KISS Woo Shipping Settings Debugger
  * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     1.0.2
+ * Version:     1.0.5
  * Author:      KISS Plugins
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: kiss-woo-shipping-debugger
  *
  * Changelog:
+ * - 1.0.5
+ *   - UX: More human-friendly descriptions:
+ *         • “Free Shipping” detection now reads as “the rate is a Free Shipping method”.
+ *         • Common variable names are translated (e.g., has_drinks → “the cart contains drinks”, adjusted_total → “the non-drink subtotal”).
+ *         • Comparisons like adjusted_total < 20 render as “the non-drink subtotal is under $20”.
+ *         • Resolves simple in-scope string assignments for variables (e.g., {custom_rate_id} → drinks_shipping_flat).
+ *   - Fix: Corrected a typo in action links registration.
+ * - 1.0.4
+ *   - UX: Adds context from surrounding conditions for matches:
+ *         • Shows WHEN-conditions for unset($rates[...]), new WC_Shipping_Rate(...), and add_fee().
+ *         • Detects common patterns like strpos($rate->method_id, 'free_shipping') to say “free shipping rate”.
+ *         • Includes IDs/labels/costs for new WC_Shipping_Rate where available.
+ * - 1.0.3
+ *   - UX: Improved human-readable messages:
+ *         • Extracts messages built with concatenation, sprintf(), and interpolated strings for $errors->add().
+ *         • Shows dynamic placeholders (e.g., {restricted_states[$state]}) when parts are non-literal.
+ *         • Attempts to display the key used in unset($rates[...]) even when dynamic, via readable placeholders.
+ *   - Fix: Avoid duplicate output by relying on a single instantiation path (no extra instantiation at file end).
  * - 1.0.2
  *   - UX: Renamed the $errors->add() section to “Checkout validation ($errors->add)”.
  *   - UX: Scanner now shows human-readable explanations:
@@ -268,6 +286,8 @@ class KISS_WSE_Debugger {
 
             $ast       = $parser->parse( $code );
             $trav      = new \PhpParser\NodeTraverser();
+            // Attach parent pointers so we can read enclosing conditions.
+            $trav->addVisitor( new \PhpParser\NodeVisitor\ParentConnectingVisitor() );
             $visitor   = new \KISSShippingDebugger\RateAddCallVisitor();
             $trav->addVisitor( $visitor );
             $trav->traverse( $ast );
@@ -283,7 +303,7 @@ class KISS_WSE_Debugger {
                 'errors'      => $visitor->getErrorAddNodes(),
             ];
 
-            // Titles (only change requested: rename errors heading)
+            // Titles
             $titles = [
                 'filterHooks' => __('Package Rate Filters', 'kiss-woo-shipping-debugger'),
                 'feeHooks'    => __('Cart Fee Hooks',      'kiss-woo-shipping-debugger'),
@@ -351,7 +371,7 @@ class KISS_WSE_Debugger {
 
     /**
      * Return a human-readable explanation for a given node.
-     * Kept conservative: uses simple extraction heuristics, no execution.
+     * Conservative and static: uses simple extraction heuristics, no execution.
      *
      * @param string          $key  Section key.
      * @param \PhpParser\Node $node Matched node.
@@ -404,31 +424,70 @@ class KISS_WSE_Debugger {
                     return __( 'Calls add_rate() to insert a custom shipping option programmatically.', 'kiss-woo-shipping-debugger' );
 
                 case 'newRates':
-                    return __( 'Instantiates WC_Shipping_Rate directly, creating a shipping option in code.', 'kiss-woo-shipping-debugger' );
+                    // new WC_Shipping_Rate(id, label, cost, meta, method_id)
+                    $parts = [];
+                    if ( property_exists( $node, 'args' ) ) {
+                        // Try to resolve ID from a variable assignment in scope
+                        $idExpr = isset( $node->args[0] ) ? $node->args[0]->value : null;
+                        $id     = $this->string_or_resolved_variable( $node, $idExpr );
+
+                        $label  = isset( $node->args[1] ) ? $this->extract_string_or_placeholder( $node->args[1]->value ) : '';
+                        $cost   = isset( $node->args[2] ) ? $this->extract_string_or_placeholder( $node->args[2]->value ) : '';
+                        if ( $id !== '' )    { $parts[] = sprintf( __( 'id “%s”', 'kiss-woo-shipping-debugger' ), $id ); }
+                        if ( $label !== '' ) { $parts[] = sprintf( __( 'label “%s”', 'kiss-woo-shipping-debugger' ), $label ); }
+                        if ( $cost !== '' )  { $parts[] = sprintf( __( 'cost %s', 'kiss-woo-shipping-debugger' ), $cost ); }
+                    }
+                    $when = $this->condition_chain_text( $node );
+                    $summary = __( 'Instantiates WC_Shipping_Rate directly, creating a shipping option in code.', 'kiss-woo-shipping-debugger' );
+                    if ( ! empty( $parts ) ) {
+                        $summary .= ' ' . sprintf( __( 'Details: %s.', 'kiss-woo-shipping-debugger' ), implode( ', ', $parts ) );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'Runs when %s.', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    return $summary;
 
                 case 'unsetRates':
-                    // unset($rates['key'])
+                    // unset($rates['key']) or dynamic
                     $keyStr = $this->extract_unset_rate_key( $node );
-                    if ( $keyStr !== '' ) {
-                        return sprintf(
-                            __( 'Removes a shipping rate by key (%s) from the available options.', 'kiss-woo-shipping-debugger' ),
+                    $when   = $this->condition_chain_text( $node );
+                    $summary = '';
+                    if ( $this->condition_mentions_free_shipping( $node ) ) {
+                        $summary = __( 'Removes the free shipping rate', 'kiss-woo-shipping-debugger' );
+                    } elseif ( $keyStr !== '' ) {
+                        $summary = sprintf(
+                            __( 'Removes a shipping rate by key (%s)', 'kiss-woo-shipping-debugger' ),
                             $keyStr
                         );
+                    } else {
+                        $summary = __( 'Removes one or more shipping rates from the available options', 'kiss-woo-shipping-debugger' );
                     }
-                    return __( 'Removes one or more shipping rates from the available options.', 'kiss-woo-shipping-debugger' );
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'when %s', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    $summary .= '.';
+                    return $summary;
 
                 case 'addFees':
                     // $cart->add_fee( label, amount, ... )
-                    if ( property_exists( $node, 'args' ) && isset( $node->args[0] ) ) {
-                        $label = $this->extract_string( $node->args[0]->value );
-                        if ( $label !== '' ) {
-                            return sprintf(
-                                __( 'Adds a cart fee/adjustment named “%s”.', 'kiss-woo-shipping-debugger' ),
-                                $label
-                            );
-                        }
+                    $label = ( property_exists( $node, 'args' ) && isset( $node->args[0] ) )
+                        ? $this->extract_string_or_placeholder( $node->args[0]->value ) : '';
+                    $amt   = ( property_exists( $node, 'args' ) && isset( $node->args[1] ) )
+                        ? $this->extract_string_or_placeholder( $node->args[1]->value ) : '';
+                    $when  = $this->condition_chain_text( $node );
+
+                    $summary = __( 'Adds a cart fee/adjustment', 'kiss-woo-shipping-debugger' );
+                    if ( $label !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'named “%s”', 'kiss-woo-shipping-debugger' ), $label );
                     }
-                    return __( 'Adds a cart fee/adjustment.', 'kiss-woo-shipping-debugger' );
+                    if ( $amt !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'for %s', 'kiss-woo-shipping-debugger' ), $amt );
+                    }
+                    if ( $when !== '' ) {
+                        $summary .= ' ' . sprintf( __( 'when %s', 'kiss-woo-shipping-debugger' ), $when );
+                    }
+                    $summary .= '.';
+                    return $summary;
             }
         } catch ( \Throwable $e ) {
             // Fall through to generic text on any parsing edge cases
@@ -437,23 +496,131 @@ class KISS_WSE_Debugger {
     }
 
     /**
-     * Try to extract a human-readable string from an expression:
+     * Try to extract a human-readable string from an expression, allowing:
      *  - plain "string"
-     *  - translation wrappers like __("string", "domain"), esc_html__("string", "domain"), etc.
+     *  - concatenation ("a" . $b . "c") -> "a{b}c"
+     *  - interpolated strings "Hello $name" -> "Hello {name}"
+     *  - translation wrappers: __("..."), esc_html__(), etc.
+     *  - sprintf("fmt %s", $x) -> "fmt {x}"
+     * For non-literals, we render placeholders like {var}, {func()}, {obj->prop}, {arr[key]}.
      */
     private function extract_string( $expr ): string {
+        // Direct string
         if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
             return (string) $expr->value;
         }
+
+        // Interpolated strings
+        if ( $expr instanceof \PhpParser\Node\Scalar\Encapsed ) {
+            $out = '';
+            foreach ( $expr->parts as $p ) {
+                if ( $p instanceof \PhpParser\Node\Scalar\EncapsedStringPart ) {
+                    $out .= $p->value;
+                } else {
+                    $out .= $this->expr_placeholder( $p );
+                }
+            }
+            return $out;
+        }
+
+        // Concatenation
+        if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
+            return $this->extract_string( $expr->left ) . $this->extract_string( $expr->right );
+        }
+
+        // Translation wrappers
         if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
             $fn = strtolower( $expr->name->toString() );
+
+            // i18n wrappers like __("string", "domain")
             $i18n = [ '__', 'esc_html__', 'esc_attr__', '_x', '_nx', '_ex' ];
-            if ( in_array( $fn, $i18n, true ) && isset( $expr->args[0] ) && $expr->args[0]->value instanceof \PhpParser\Node\Scalar\String_ ) {
-                return (string) $expr->args[0]->value->value;
+            if ( in_array( $fn, $i18n, true ) && isset( $expr->args[0] ) ) {
+                return $this->extract_string( $expr->args[0]->value );
+            }
+
+            // sprintf("format %s ...", args...)
+            if ( $fn === 'sprintf' && isset( $expr->args[0] ) ) {
+                $fmt = $this->extract_string( $expr->args[0]->value );
+                $argTokens = [];
+                for ( $i = 1; isset( $expr->args[$i] ); $i++ ) {
+                    $argTokens[] = $this->expr_placeholder( $expr->args[$i]->value );
+                }
+                // Replace %s/%d etc. sequentially (simple heuristic)
+                $idx = 0;
+                $out = preg_replace_callback('/%[%bcdeEufFgGosxX]/', function($m) use (&$idx, $argTokens) {
+                    if ($m[0] === '%%') return '%';
+                    $token = $argTokens[$idx] ?? '{?}';
+                    $idx++;
+                    return $token;
+                }, $fmt );
+                return $out ?? $fmt;
             }
         }
-        // Fallback: we don’t attempt to resolve concatenations or variables for safety.
-        return '';
+
+        // Fallback placeholder
+        return $this->expr_placeholder( $expr );
+    }
+
+    /**
+     * Like extract_string(), but if it's not a clear string, return a placeholder.
+     */
+    private function extract_string_or_placeholder( $expr ): string {
+        $s = $this->extract_string( $expr );
+        if ( $s !== '' && $s[0] !== '{' ) {
+            return $s;
+        }
+        return $this->expr_placeholder( $expr );
+    }
+
+    /**
+     * Render a readable placeholder for an arbitrary expression.
+     * Examples: $postcode -> {postcode}, $arr[$state] -> {arr[$state]}, $obj->method() -> {obj->method()}
+     */
+    private function expr_placeholder( $expr ): string {
+        try {
+            if ( $expr instanceof \PhpParser\Node\Expr\Variable ) {
+                return '{' . (is_string($expr->name) ? $expr->name : '?') . '}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
+                $var  = $this->expr_placeholder( $expr->var );
+                $dim  = $expr->dim ? $this->extract_string( $expr->dim ) : '';
+                if ( $dim === '' && $expr->dim ) $dim = $this->expr_placeholder( $expr->dim );
+                return str_replace(['{','}'],'',$var) ? '{' . trim($var, '{}') . '[' . $dim . ']}' : '{array[' . $dim . ']}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\PropertyFetch ) {
+                $obj = trim( $this->expr_placeholder( $expr->var ), '{}' );
+                $prop = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
+                return '{' . $obj . '->' . $prop . '}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\MethodCall ) {
+                $obj = trim( $this->expr_placeholder( $expr->var ), '{}' );
+                $meth = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
+                return '{' . $obj . '->' . $meth . '()}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\StaticCall ) {
+                $cls = $expr->class instanceof \PhpParser\Node\Name ? $expr->class->toString() : '?';
+                $meth = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
+                return '{' . $cls . '::' . $meth . '()}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) {
+                return $expr->value;
+            }
+            if ( $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber ) {
+                return (string) $expr->value;
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\ConstFetch && $expr->name instanceof \PhpParser\Node\Name ) {
+                return '{' . $expr->name->toString() . '}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
+                return '{' . $expr->name->toString() . '()}';
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\Concat ) {
+                return $this->extract_string( $expr ); // handled already
+            }
+        } catch ( \Throwable $e ) {
+            // ignore and fall through
+        }
+        return '{?}';
     }
 
     /**
@@ -479,18 +646,292 @@ class KISS_WSE_Debugger {
 
     /**
      * Extract the rate key from unset($rates['key']) if available.
+     * Returns a literal or a readable placeholder. Attempts local variable resolution.
      */
     private function extract_unset_rate_key( \PhpParser\Node $unsetStmt ): string {
         try {
             if ( $unsetStmt instanceof \PhpParser\Node\Stmt\Unset_
                  && isset( $unsetStmt->vars[0] )
-                 && $unsetStmt->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch
-                 && $unsetStmt->vars[0]->dim instanceof \PhpParser\Node\Scalar\String_ ) {
-                return $unsetStmt->vars[0]->dim->value;
+                 && $unsetStmt->vars[0] instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
+
+                $dim = $unsetStmt->vars[0]->dim;
+                if ( $dim instanceof \PhpParser\Node\Scalar\String_ ) {
+                    return $dim->value;
+                }
+                if ( $dim instanceof \PhpParser\Node\Expr\Variable && is_string( $dim->name ) ) {
+                    $resolved = $this->resolve_variable_value( $unsetStmt, $dim->name );
+                    if ( is_string( $resolved ) && $resolved !== '' ) {
+                        return $resolved;
+                    }
+                }
+                if ( $dim ) {
+                    // Render readable placeholder for dynamic key
+                    $ph = $this->extract_string( $dim );
+                    if ( $ph === '' ) {
+                        $ph = $this->expr_placeholder( $dim );
+                    }
+                    return $ph;
+                }
             }
         } catch ( \Throwable $e ) {
             // ignore
         }
         return '';
+    }
+
+    /**
+     * If $expr is a variable, try to resolve a string assignment in the same function scope.
+     * Otherwise, return extract_string_or_placeholder().
+     */
+    private function string_or_resolved_variable( \PhpParser\Node $ctx, $expr ): string {
+        if ( $expr instanceof \PhpParser\Node\Expr\Variable && is_string( $expr->name ) ) {
+            $val = $this->resolve_variable_value( $ctx, $expr->name );
+            if ( is_string( $val ) && $val !== '' ) {
+                return $val;
+            }
+        }
+        return $this->extract_string_or_placeholder( $expr );
+    }
+
+    /**
+     * Resolve the most recent scalar string assigned to $varName in the same function-like scope
+     * before the line of $fromNode.
+     */
+    private function resolve_variable_value( \PhpParser\Node $fromNode, string $varName ): ?string {
+        try {
+            // Find nearest function-like ancestor
+            $cur = $fromNode;
+            $scope = null;
+            while ( $cur ) {
+                if ( $cur instanceof \PhpParser\Node\FunctionLike ) { $scope = $cur; break; }
+                $cur = $cur->getAttribute('parent');
+                if ( ! $cur instanceof \PhpParser\Node ) break;
+            }
+            if ( ! $scope ) return null;
+
+            $finder = new \PhpParser\NodeFinder();
+            /** @var \PhpParser\Node\Expr\Assign[] $assigns */
+            $assigns = $finder->findInstanceOf( $scope, \PhpParser\Node\Expr\Assign::class );
+
+            $line = $fromNode->getLine();
+            $best   = null;
+            $bestLn = -1;
+
+            foreach ( $assigns as $as ) {
+                if ( $as->var instanceof \PhpParser\Node\Expr\Variable && is_string( $as->var->name ) && $as->var->name === $varName ) {
+                    $ln = (int) $as->getLine();
+                    if ( $ln < $line && $ln > $bestLn ) {
+                        // Accept simple strings or expressions we can stringify
+                        $str = $this->extract_string( $as->expr );
+                        if ( $str === '' ) {
+                            if ( $as->expr instanceof \PhpParser\Node\Scalar\String_ ) {
+                                $str = $as->expr->value;
+                            }
+                        }
+                        if ( $str !== '' ) {
+                            $best   = $str;
+                            $bestLn = $ln;
+                        }
+                    }
+                }
+            }
+            return $best;
+        } catch ( \Throwable $e ) {
+            return null;
+        }
+    }
+
+    /**
+     * Return a natural-language description of the chain of enclosing conditions
+     * for a node (nearest first), e.g. "the cart contains drinks and the non-drink subtotal is under $20".
+     */
+    private function condition_chain_text( \PhpParser\Node $node ): string {
+        $conds = [];
+        $cur = $node;
+        $limit = 4; // keep short
+        while ( $limit-- > 0 && $cur ) {
+            $parent = $cur->getAttribute('parent');
+            if ( $parent instanceof \PhpParser\Node\Stmt\If_ ) {
+                $desc = $this->cond_to_text( $parent->cond );
+                if ( $desc !== '' ) $conds[] = $desc;
+            }
+            $cur = $parent instanceof \PhpParser\Node ? $parent : null;
+        }
+        if ( empty( $conds ) ) return '';
+        // De-duplicate simple repeats
+        $conds = array_values( array_unique( array_filter( $conds ) ) );
+        return implode( ' ' . __( 'and', 'kiss-woo-shipping-debugger' ) . ' ', $conds );
+    }
+
+    /**
+     * Convert a boolean expression into a short readable phrase.
+     */
+    private function cond_to_text( $expr ): string {
+        try {
+            // (A && B) / (A || B)
+            if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\BooleanAnd ) {
+                $left = $this->cond_to_text( $expr->left );
+                $right = $this->cond_to_text( $expr->right );
+                $glue = ' ' . __( 'and', 'kiss-woo-shipping-debugger' ) . ' ';
+                return trim( $left ) . $glue . trim( $right );
+            }
+            if ( $expr instanceof \PhpParser\Node\Expr\BinaryOp\BooleanOr ) {
+                $left = $this->cond_to_text( $expr->left );
+                $right = $this->cond_to_text( $expr->right );
+                $glue = ' ' . __( 'or', 'kiss-woo-shipping-debugger' ) . ' ';
+                return trim( $left ) . $glue . trim( $right );
+            }
+
+            // Special-case: strpos( ... , 'free_shipping') !== false  (or !=)
+            $isFreeShip = function($call) {
+                return ($call instanceof \PhpParser\Node\Expr\FuncCall)
+                    && ($call->name instanceof \PhpParser\Node\Name)
+                    && (strtolower($call->name->toString()) === 'strpos')
+                    && isset($call->args[1])
+                    && strtolower($this->extract_string($call->args[1]->value)) === 'free_shipping';
+            };
+            if ( ($expr instanceof \PhpParser\Node\Expr\BinaryOp\NotIdentical || $expr instanceof \PhpParser\Node\Expr\BinaryOp\NotEqual)
+                 && (
+                      ($isFreeShip($expr->left) && $this->is_false_const($expr->right))
+                      || ($isFreeShip($expr->right) && $this->is_false_const($expr->left))
+                 ) ) {
+                return __( 'the rate is a Free Shipping method', 'kiss-woo-shipping-debugger' );
+            }
+
+            // Comparisons with friendly variable names
+            $opMap = [
+                \PhpParser\Node\Expr\BinaryOp\Smaller::class        => '<',
+                \PhpParser\Node\Expr\BinaryOp\SmallerOrEqual::class => '<=',
+                \PhpParser\Node\Expr\BinaryOp\Greater::class        => '>',
+                \PhpParser\Node\Expr\BinaryOp\GreaterOrEqual::class => '>=',
+                \PhpParser\Node\Expr\BinaryOp\Equal::class          => '==',
+                \PhpParser\Node\Expr\BinaryOp\NotEqual::class       => '!=',
+                \PhpParser\Node\Expr\BinaryOp\Identical::class      => '===',
+                \PhpParser\Node\Expr\BinaryOp\NotIdentical::class   => '!==',
+            ];
+            foreach ( $opMap as $cls => $op ) {
+                if ( $expr instanceof $cls ) {
+                    // If it's adjusted_total < number → "the non-drink subtotal is under $N"
+                    if ( $this->is_var_named( $expr->left, 'adjusted_total' ) && $this->is_number_like( $expr->right ) ) {
+                        $num = $this->number_to_money( $expr->right );
+                        switch ( $op ) {
+                            case '<':  return sprintf( __( 'the non-drink subtotal is under %s', 'kiss-woo-shipping-debugger' ), $num );
+                            case '<=': return sprintf( __( 'the non-drink subtotal is at most %s', 'kiss-woo-shipping-debugger' ), $num );
+                            case '>':  return sprintf( __( 'the non-drink subtotal is over %s', 'kiss-woo-shipping-debugger' ), $num );
+                            case '>=': return sprintf( __( 'the non-drink subtotal is at least %s', 'kiss-woo-shipping-debugger' ), $num );
+                            default:   return 'adjusted_total ' . $op . ' ' . $num;
+                        }
+                    }
+                    return $this->simple_expr_text( $expr->left ) . ' ' . $op . ' ' . $this->simple_expr_text( $expr->right );
+                }
+            }
+
+            // Negation
+            if ( $expr instanceof \PhpParser\Node\Expr\BooleanNot ) {
+                $inner = $this->simple_expr_text( $expr->expr );
+                // Pretty negation: "!has_drinks" → "the cart does not contain drinks"
+                if ( $this->is_var_named( $expr->expr, 'has_drinks' ) ) {
+                    return __( 'the cart does not contain drinks', 'kiss-woo-shipping-debugger' );
+                }
+                return __( 'not', 'kiss-woo-shipping-debugger' ) . ' ' . $inner;
+            }
+
+            // Bare variables with friendly names
+            if ( $this->is_var_named( $expr, 'has_drinks' ) ) {
+                return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
+            }
+
+            // Fallback
+            return $this->simple_expr_text( $expr );
+        } catch ( \Throwable $e ) {
+            return '';
+        }
+    }
+
+    private function is_false_const( $expr ): bool {
+        return $expr instanceof \PhpParser\Node\Expr\ConstFetch
+            && $expr->name instanceof \PhpParser\Node\Name
+            && strtolower($expr->name->toString()) === 'false';
+    }
+
+    private function is_var_named( $expr, string $name ): bool {
+        return $expr instanceof \PhpParser\Node\Expr\Variable
+            && is_string( $expr->name )
+            && $expr->name === $name;
+    }
+
+    private function is_number_like( $expr ): bool {
+        return $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber;
+    }
+
+    private function number_to_money( $expr ): string {
+        if ( $this->is_number_like( $expr ) ) {
+            $val = (float) $expr->value;
+            // Simple formatting without locale for clarity
+            if ( floor($val) == $val ) {
+                return '$' . number_format( (int) $val, 0 );
+            }
+            return '$' . number_format( $val, 2 );
+        }
+        return (string) $this->extract_string_or_placeholder( $expr );
+    }
+
+    /**
+     * Render a short text for simple expressions used in conditions.
+     */
+    private function simple_expr_text( $expr ): string {
+        if ( $this->is_var_named( $expr, 'has_drinks' ) ) return __( 'the cart contains drinks', 'kiss-woo-shipping-debugger' );
+        if ( $this->is_var_named( $expr, 'adjusted_total' ) ) return __( 'the non-drink subtotal', 'kiss-woo-shipping-debugger' );
+        if ( $expr instanceof \PhpParser\Node\Scalar\String_ ) return "'" . $expr->value . "'";
+        if ( $expr instanceof \PhpParser\Node\Scalar\LNumber || $expr instanceof \PhpParser\Node\Scalar\DNumber ) return (string) $expr->value;
+        if ( $expr instanceof \PhpParser\Node\Expr\Variable ) return (is_string($expr->name) ? (string)$expr->name : '{var}');
+        if ( $expr instanceof \PhpParser\Node\Expr\PropertyFetch ) {
+            $obj = $this->simple_expr_text( $expr->var );
+            $prop = $expr->name instanceof \PhpParser\Node\Identifier ? $expr->name->toString() : '?';
+            return $obj . '->' . $prop;
+        }
+        if ( $expr instanceof \PhpParser\Node\Expr\ArrayDimFetch ) {
+            $arr = $this->simple_expr_text( $expr->var );
+            $dim = $expr->dim ? $this->simple_expr_text( $expr->dim ) : '';
+            return $arr . '[' . $dim . ']';
+        }
+        if ( $expr instanceof \PhpParser\Node\Expr\FuncCall && $expr->name instanceof \PhpParser\Node\Name ) {
+            return $expr->name->toString() . '()';
+        }
+        if ( $expr instanceof \PhpParser\Node\Expr\ConstFetch && $expr->name instanceof \PhpParser\Node\Name ) {
+            return $expr->name->toString();
+        }
+        return $this->expr_placeholder( $expr );
+    }
+
+    /**
+     * Heuristic: check if the immediate condition mentions free shipping.
+     */
+    private function condition_mentions_free_shipping( \PhpParser\Node $node ): bool {
+        // Look at nearest If_ condition above the node for a strpos(..., 'free_shipping') !== false
+        $cur = $node;
+        $steps = 2;
+        while ( $steps-- > 0 && $cur ) {
+            $parent = $cur->getAttribute('parent');
+            if ( $parent instanceof \PhpParser\Node\Stmt\If_ ) {
+                $cond = $parent->cond;
+                $isFree = function($call) {
+                    return ($call instanceof \PhpParser\Node\Expr\FuncCall)
+                        && ($call->name instanceof \PhpParser\Node\Name)
+                        && (strtolower($call->name->toString()) === 'strpos')
+                        && isset($call->args[1])
+                        && strtolower($this->extract_string($call->args[1]->value)) === 'free_shipping';
+                };
+                if ( ($cond instanceof \PhpParser\Node\Expr\BinaryOp\NotIdentical || $cond instanceof \PhpParser\Node\Expr\BinaryOp\NotEqual)
+                     && (
+                          ($isFree($cond->left) && $this->is_false_const($cond->right))
+                          || ($isFree($cond->right) && $this->is_false_const($cond->left))
+                     ) ) {
+                    return true;
+                }
+            }
+            $cur = $parent instanceof \PhpParser\Node ? $parent : null;
+        }
+        return false;
     }
 }
