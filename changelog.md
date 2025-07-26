@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.7
+* **Fix:** Eliminated "Undefined array key zone_id" by iterating zone IDs (and explicitly adding zone ID 0 for Rest of World).
+* **UX:** Price outputs in the Zones & Methods preview now render as clean text (no Woo price HTML).
+  * Added `price_to_text()` helper and smarter Flat Rate handling (numeric vs expression).
+  * Tidied method lines spacing; badges and titles are consistent.
+
+## 1.0.6
+* **Feature:** Restored the “Shipping Zones & Methods Preview” table with deep links to edit zones/methods.
+* **UX:** Added owner-friendly enhancements:
+  * Status badges (Enabled/Disabled), per-zone enabled/disabled counts.
+  * Warnings for common issues (e.g., zone with no enabled methods; Free Shipping with no requirement).
+  * Quick filters: “Only show zones with issues” and “Show only enabled methods”.
+  * Concise locations summary (e.g., “US (2 states), CA (3 provinces) … +N more”).
+  * Preview is capped to 100 rows; shows “And X more rows…” if applicable.
+
+## 1.0.5
+* **UX:** More human-friendly descriptions:
+  * “Free Shipping” detection now reads as “the rate is a Free Shipping method”.
+  * Common variable names are translated (e.g., has_drinks → “the cart contains drinks”, adjusted_total → “the non-drink subtotal”).
+  * Comparisons like `adjusted_total < 20` render as “the non-drink subtotal is under $20”.
+  * Resolves simple in-scope string assignments for variables (e.g., `{custom_rate_id}` → `drinks_shipping_flat`).
+* **Fix:** Corrected a typo in action links registration.
+
+## 1.0.4
+* **UX:** Adds context from surrounding conditions for matches:
+  * Shows WHEN-conditions for `unset($rates[...])`, `new WC_Shipping_Rate(...)`, and `add_fee()`.
+  * Detects common patterns like `strpos($rate->method_id, 'free_shipping')` to say “free shipping rate”.
+  * Includes IDs/labels/costs for new `WC_Shipping_Rate` where available.
+
+## 1.0.3
+* **UX:** Improved human-readable messages:
+  * Extracts messages built with concatenation, `sprintf()`, and interpolated strings for `$errors->add()`.
+  * Shows dynamic placeholders (e.g., `{restricted_states[$state]}`) when parts are non-literal.
+  * Attempts to display the key used in `unset($rates[...])` even when dynamic, via readable placeholders.
+* **Fix:** Avoid duplicate output by relying on a single instantiation path (no extra instantiation at file end).
+
+## 1.0.2
+* **UX:** Renamed the `$errors->add()` section to “Checkout validation ($errors->add)”.
+* **UX:** Scanner now shows human-readable explanations:
+  * Extracts and displays error message strings passed to `$errors->add()`.
+  * Adds short plain-English descriptions for filters, fee hooks, `add_rate()`, `new WC_Shipping_Rate`, `unset($rates[])`, and `add_fee()`.
+
 ## 1.0.1
 * **Security:** Added capability check (`manage_woocommerce`) and nonce verification to the CSV export handler, with proper CSV streaming headers and a hard `exit;` after output.
 * **Security:** Restricted “additional file” scanning to the active child theme’s `/inc/` directory using `realpath` clamping and base‐path verification.
