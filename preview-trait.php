@@ -1,237 +1,8 @@
 <?php
 /**
- * Plugin Name: KISS Woo Shipping Settings Debugger
- * Description: Exports UI-based WooCommerce shipping settings and scans theme files for custom shipping rules via AST.
- * Version:     1.0.7
- * Author:      KISS Plugins
- * Requires at least: 6.0
- * Requires PHP: 7.4
- * Text Domain: kiss-woo-shipping-debugger
+ * Trait containing admin UI helper methods for the shipping settings preview.
  */
-
-if ( ! defined( 'ABSPATH' ) ) exit;
-define( 'KISS_WSE_PLUGIN_FILE', __FILE__ );
-
-require_once __DIR__ . '/preview-trait.php';
-require_once __DIR__ . '/scanner-trait.php';
-
-add_action( 'plugins_loaded', 'kiss_wse_initialize_debugger' );
-/**
- * Initialize the debugger after plugins load.
- *
- * Displays an admin notice if WooCommerce is inactive.
- */
-function kiss_wse_initialize_debugger(): void {
-    if ( ! class_exists( 'WooCommerce' ) ) {
-        add_action( 'admin_notices', fn() => printf(
-            '<div class="notice notice-error"><p>%s</p></div>',
-            esc_html__( 'KISS Woo Shipping Settings Debugger requires WooCommerce to be active.', 'kiss-woo-shipping-debugger' )
-        ));
-        return;
-    }
-    new KISS_WSE_Debugger();
-}
-
-/**
- * Main controller for the Shipping Settings Debugger.
- */
-class KISS_WSE_Debugger {
-    private string $page_slug = 'kiss-wse-export';
-    use KISS_WSE_Preview, KISS_WSE_Scanner;
-
-    /**
-     * Constructor. Hooks into WordPress admin and ensures PHP-Parser is loaded.
-     */
-    public function __construct() {
-        // Load PHP-Parser
-        if ( ! class_exists( \PhpParser\ParserFactory::class ) ) {
-            $this->maybe_require_parser_loader();
-        }
-
-        add_filter( 'plugin_action_links_' . plugin_basename( KISS_WSE_PLUGIN_FILE ), [ $this, 'add_action_links' ] );
-        add_action( 'admin_menu', [ $this, 'register_menu' ] );
-        add_action( 'admin_post_' . $this->page_slug, [ $this, 'handle_export' ] );
-    }
-
-    /**
-     * Attempt to locate and require a php-parser loader from any plugin folder.
-     */
-    private function maybe_require_parser_loader(): void {
-        foreach ( glob( WP_PLUGIN_DIR . '/*', GLOB_ONLYDIR ) as $dir ) {
-            $loader = $dir . '/php-parser-loader.php';
-            if ( file_exists( $loader ) ) {
-                require_once $loader;
-                if ( class_exists( \PhpParser\ParserFactory::class ) ) {
-                    return;
-                }
-            }
-        }
-        error_log( 'KISS WSE Debugger: php-parser-loader.php not found.' );
-    }
-
-    /**
-     * Add a convenient settings link on the plugins page.
-     */
-    public function add_action_links( array $links ): array {
-        $url  = esc_url( admin_url( 'tools.php?page=' . $this->page_slug ) );
-        $text = esc_html__( 'Export & Scan Settings', 'kiss-woo-shipping-debugger' );
-        array_unshift( $links, "<a href=\"$url\">$text</a>" );
-        return $links;
-    }
-
-    /**
-     * Register the Tools submenu page for the debugger UI.
-     */
-    public function register_menu(): void {
-        add_management_page(
-            __( 'KISS Woo Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            __( 'KISS Shipping Debugger', 'kiss-woo-shipping-debugger' ),
-            'manage_woocommerce',
-            $this->page_slug,
-            [ $this, 'render_page' ]
-        );
-    }
-
-    /**
-     * Output the main admin page with scan and export options.
-     */
-    public function render_page(): void {
-        $additional = $_GET['wse_additional_file'] ?? '';
-        $additional = sanitize_text_field( wp_unslash( $additional ) );
-
-        echo '<div class="wrap">';
-        echo '<h1>' . esc_html__( 'KISS Woo Shipping Settings Debugger & Scanner', 'kiss-woo-shipping-debugger' ) . '</h1>';
-
-        // --- PHP-Parser Status & Self-Test (auto) ---
-        $parser_loaded = class_exists( \PhpParser\ParserFactory::class );
-        $parser_ok     = false;
-        $parser_msg    = '';
-
-        if ( $parser_loaded ) {
-            try {
-                $parser = $this->create_parser();
-                // Tiny parse test
-                $test_code = "<?php\nfunction _kiss_wse_test(){return 42;} _kiss_wse_test();";
-                $ast = $parser->parse( $test_code );
-                $parser_ok  = is_array( $ast ) && ! empty( $ast );
-                $parser_msg = $parser_ok
-                    ? __( 'PHP-Parser is loaded and parsed a test snippet successfully.', 'kiss-woo-shipping-debugger' )
-                    : __( 'PHP-Parser is present but could not parse the test snippet.', 'kiss-woo-shipping-debugger' );
-            } catch ( \Throwable $e ) {
-                $parser_ok  = false;
-                $parser_msg = sprintf(
-                    /* translators: %s is an error message */
-                    __( 'PHP-Parser error: %s', 'kiss-woo-shipping-debugger' ),
-                    $e->getMessage()
-                );
-                error_log( '[KISS WSE Parser Test] ' . $e->getMessage() );
-            }
-        } else {
-            $parser_msg = __( 'PHP-Parser is not loaded. Some scanning features may be unavailable.', 'kiss-woo-shipping-debugger' );
-        }
-
-        if ( $parser_loaded && $parser_ok ) {
-            printf(
-                '<div class="notice notice-success"><p>%s</p></div>',
-                esc_html( $parser_msg )
-            );
-        } else {
-            printf(
-                '<div class="notice notice-warning"><p>%s</p></div>',
-                esc_html( $parser_msg )
-            );
-        }
-
-        // --- Custom Rules Scanner UI ---
-        echo '<hr/><h2>' . esc_html__( 'Custom Rules Scanner', 'kiss-woo-shipping-debugger' ) . '</h2>';
-        echo '<p>' . esc_html__( 'Scans your theme files for shipping-related code via AST.', 'kiss-woo-shipping-debugger' ) . '</p>';
-        printf(
-            '<form method="get" style="padding:1em;border:1px solid #c3c4c7;background:#fff;">
-                <input type="hidden" name="page" value="%1$s">
-                <p>
-                  <label><strong>%2$s</strong></label><br>
-                  <span style="font-family:monospace;">%3$s/inc</span>
-                  <input type="text" name="wse_additional_file" class="regular-text" placeholder="extra.php" value="%4$s">
-                  <br><em>%6$s</em>
-                </p>
-                <p><button type="submit" class="button">%5$s</button></p>
-             </form>',
-            esc_attr( $this->page_slug ),
-            esc_html__( 'Scan Additional Theme File (Optional)', 'kiss-woo-shipping-debugger' ),
-            esc_html( get_stylesheet_directory() ),
-            esc_attr( $additional ),
-            esc_html__( 'Scan for Custom Rules', 'kiss-woo-shipping-debugger' ),
-            esc_html__( 'Path is restricted to the active child theme’s /inc/ directory (e.g., "extra.php" or "subdir/custom.php").', 'kiss-woo-shipping-debugger' )
-        );
-
-        try {
-            $this->scan_and_render_custom_rules( $additional );
-        } catch ( \Throwable $e ) {
-            echo '<div class="notice notice-error"><pre>' . esc_html( $e->getMessage() ) . '</pre></div>';
-            error_log( '[KISS Scanner] ' . $e->getMessage() );
-        }
-
-        // --- UI Settings Export UI + Zones & Methods Preview ---
-        echo '<hr/><h2>' . esc_html__( 'UI-Based Settings Export', 'kiss-woo-shipping-debugger' ) . '</h2>';
-        echo '<p>' . esc_html__( 'Preview and download WooCommerce shipping settings configured in the admin.', 'kiss-woo-shipping-debugger' ) . '</p>';
-
-        // Export button
-        printf(
-            '<form method="post" action="%1$s" style="margin-bottom:1em;">%2$s
-               <input type="hidden" name="action" value="%3$s">
-               <p><button type="submit" class="button button-primary">%4$s</button></p>
-             </form>',
-            esc_url( admin_url( 'admin-post.php' ) ),
-            wp_nonce_field( $this->page_slug, 'wse_nonce', true, false ),
-            esc_attr( $this->page_slug ),
-            esc_html__( 'Download CSV of UI Settings', 'kiss-woo-shipping-debugger' )
-        );
-
-        // Zones preview table + filters + warnings
-        $this->render_preview_table();
-
-        echo '</div>';
-    }
-
-    /**
-     * Stream a CSV export of configured WooCommerce shipping settings.
-     */
-    public function handle_export(): void {
-        // Capability check
-        if ( ! current_user_can( 'manage_woocommerce' ) ) {
-            wp_die( esc_html__( 'Insufficient permissions.', 'kiss-woo-shipping-debugger' ), 403 );
-        }
-
-        // Nonce verification
-        check_admin_referer( $this->page_slug, 'wse_nonce' );
-
-        // Prepare CSV streaming
-        nocache_headers();
-        header( 'Content-Type: text/csv; charset=utf-8' );
-
-        $host     = parse_url( home_url(), PHP_URL_HOST );
-        $filename = sanitize_file_name( sprintf( '%s-shipping-%s.csv', (string) $host, wp_date( 'Y-m-d-His' ) ) );
-        header( 'Content-Disposition: attachment; filename=' . $filename );
-
-        /**
-         * Stream CSV.
-         * DRY: allow existing logic to output rows if present.
-         */
-        if ( method_exists( $this, 'output_csv' ) ) {
-            $this->output_csv();
-        } elseif ( function_exists( 'kiss_wse_output_csv' ) ) {
-            kiss_wse_output_csv();
-        } else {
-            $out = fopen( 'php://output', 'w' );
-            if ( $out ) {
-                fputcsv( $out, [ 'notice', 'No export rows available in this build.' ] );
-                fclose( $out );
-            }
-        }
-
-        exit;
-    }
-
+trait KISS_WSE_Preview {
 
     private function render_preview_table(): void {
         if ( ! class_exists( 'WC_Shipping_Zones' ) ) {
@@ -475,28 +246,22 @@ class KISS_WSE_Debugger {
                     $parts[] = esc_html( (string) $code );
                     break;
             }
-
-            if ( count( $parts ) >= $display_cap ) {
-                break;
-            }
         }
 
-        $more = max( 0, count( $locations ) - $display_cap );
-        $label = implode( ', ', $parts );
-        if ( $more > 0 ) {
-            $label .= ' <span style="opacity:.75;">+' . (int) $more . ' ' . esc_html__( 'more', 'kiss-woo-shipping-debugger' ) . '</span>';
+        $display = array_slice( $parts, 0, $display_cap );
+        $extra    = count( $parts ) - count( $display );
+        $out      = implode( ', ', $display );
+        if ( $extra > 0 ) {
+            $out .= ' +' . $extra . '…';
         }
-        return $label;
+        return $out;
     }
 
-    /**
-     * Summarize a shipping method with useful details.
-     */
     private function summarize_method( $method ): string {
-        $title = isset( $method->title ) ? (string) $method->title : ( isset( $method->method_title ) ? (string) $method->method_title : (string) $method->id );
-        $id    = (string) ( $method->id ?? '' );
-
+        $title = (string) $method->get_method_title();
         $detail = '';
+
+        $id = $method->id;
         if ( $id === 'flat_rate' ) {
             $cost = $method->get_option( 'cost', '' );
             if ( $cost !== '' ) {
@@ -572,5 +337,4 @@ class KISS_WSE_Debugger {
             'instance_id' => $instance_id,
         ], admin_url( 'admin.php' ) );
     }
-
 }
